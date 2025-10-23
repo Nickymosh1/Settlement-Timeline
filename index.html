@@ -11,7 +11,7 @@
     <!-- Firebase Libraries -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Firebase/App Config ---
@@ -543,7 +543,7 @@
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
-                setLogLevel('Debug');
+                // setLogLevel('Debug'); // <-- REMOVED: This was causing the error
                 setFirestoreLogLevel('Debug');
 
                 onAuthStateChanged(auth, (user) => {
@@ -733,6 +733,7 @@
 
 </body>
 </html>
+
 
 
 
