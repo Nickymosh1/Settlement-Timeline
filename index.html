@@ -22,13 +22,12 @@
         // --- Global Firebase Vars ---
         let app, auth, db, userId, isAuthReady = false;
         let settlementCollectionRef;
-
+ 
         // --- Global App State ---
         let data = []; // This will be populated from Firestore
         
-        // D3 Selections
-        const container = d3.select("#chart-container");
-        const tooltip = d3.select("#tooltip");
+        // D3 Selections - Declare globally, assign when DOM is ready
+        let container, tooltip;
 
         // --- Initial Data (for seeding only) ---
         const initialCsvData = `
@@ -502,6 +501,10 @@
 
         // --- Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
+            // --- Assign D3 Selections ---
+            container = d3.select("#chart-container");
+            tooltip = d3.select("#tooltip");
+
             // --- Tab Switching Logic ---
             const tabChartBtn = document.getElementById('tab-chart');
             const tabDataBtn = document.getElementById('tab-data');
@@ -730,4 +733,5 @@
 
 </body>
 </html>
+
 
