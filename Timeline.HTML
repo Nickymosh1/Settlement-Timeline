@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settlement Runs Timeline</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Custom styles for D3 elements */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .x-axis path,
+        .x-axis line,
+        .y-axis path,
+        .y-axis line {
+            stroke: #e2e8f0; /* Tailwind gray-200 */
+        }
+        .x-axis text,
+        .y-axis text {
+            fill: #475569; /* Tailwind slate-600 */
+            font-size: 0.75rem;
+        }
+        .run-bar:hover {
+            opacity: 0.8;
+            cursor: pointer;
+        }
+        /* Style for the tooltip horizontal rule */
+        #tooltip hr {
+            border-top: 1px solid #475569; /* slate-600 */
+            margin-top: 4px;
+            margin-bottom: 4px;
+        }
+        /* Ensure chart container has a height */
+        #chart-container {
+            min-height: 400px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 h-full p-4 md:p-8">
+
+    <div class="bg-white rounded-lg shadow-xl p-4 md:p-6 w-full max-w-7xl mx-auto flex flex-col min-h-[90vh]">
+        <h1 class="text-2xl font-bold text-slate-800 mb-1">Settlement Runs Timeline</h1>
+        <p class="text-sm text-slate-500 mb-4">
+
+        </p>
+
+        <!-- New Tab Layout -->
+        <div class="mt-4">
+            <!-- Tab Navigation -->
+            <div class="border-b border-slate-200">
+                <nav class="flex -mb-px" aria-label="Tabs">
+                    <button id="tab-chart" class="border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8">
+                        Timeline Chart
+                    </button>
+                    <button id="tab-data" class="border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8">
+                        Edit Data
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Tab Panels -->
+            <div class="mt-6">
+                <!-- Chart Panel (visible by default) -->
+                <div id="panel-chart" class="block h-[75vh]">
+                    <div id="chart-container" class="flex-grow w-full h-full relative border rounded-md border-slate-200"></div>
+                </div>
+
+                <!-- Data Panel (hidden by default) -->
+                <div id="panel-data" class="hidden h-[75vh] flex flex-col">
+                    <h2 class="text-lg font-semibold text-slate-700 mb-2">Edit Data (CSV Format)</h2>
+                    <p class="text-xs text-slate-500 mb-2">Change the data below and click "Update Chart".</p>
+                    <textarea id="csv-input" class="w-full flex-grow rounded-md border-slate-300 shadow-sm text-xs p-2 font-mono" rows="20"></textarea>
+                    <button id="update-chart-btn" class="mt-4 w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
+                        Update Chart and View
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="fixed hidden bg-slate-900 text-white text-xs rounded-md px-3 py-2 shadow-lg" style="pointer-events: none;"></div>
+
+    <script>
+        // Initial data to pre-fill the textarea
+        const initialCsvData = `
+,Effective from date,No of supplies,(II) Run,SF run,(R1) Run,(RF) Run,(DF) Run
+,22/10/2025,2,29/11/2025,1/12/2025,2/12/2025,22/02/2026,22/06/2027
+,23/10/2025,26,30/11/2025,3/12/2025,4/12/2025,23/02/2026,23/06/2027
+,24/10/2025,25,1/12/2025,4/12/2025,5/12/2025,24/02/2026,24/06/2027
+,27/10/2025,41,3/12/2025,5/12/2025,6/12/2025,27/02/2026,27/06/2027
+,28/10/2025,30,4/12/2025,6/12/2025,7/12/2025,28/02/2026,28/06/2027
+,29/10/2025,12,5/12/2025,7/12/2025,8/12/2025,1/03/2026,29/06/2027
+,30/10/2025,2,6/12/2025,8/12/2025,10/12/2025,2/03/2026,30/06/2027
+,31/10/2025,1,7/12/2025,9/12/2025,11/12/2025,3/03/2026,1/07/2027
+        `;
+
+        // --- Global Setup ---
+        // Define the settlement run types from CSV headers
+        const runTypes = ["(II) Run", "SF run", "(R1) Run", "(RF) Run", "(DF) Run"];
+        // Define all possible period names (for coloring and legend)
+        const allPeriodTypes = ["Effective", "(II) Run", "SF run", "(R1) Run", "(RF) Run", "(DF) Run"];
+
+        // D3 Formatters
+        const parseDate = d3.timeParse("%d/%m/%Y");
+        const formatFullDate = d3.timeFormat("%a, %d %B %Y");
+        const formatShortDate = d3.timeFormat("%d-%b-%y");
+
+        // Global data variable
+        let data = [];
+
+        // D3 Selections
+        const container = d3.select("#chart-container");
+        const tooltip = d3.select("#tooltip");
+
+        // DOM Selections for data input
+        const csvInput = document.getElementById('csv-input');
+        const updateBtn = document.getElementById('update-chart-btn');
+
+
+        /**
+         * Main function to parse data from the textarea and redraw the chart
+         */
+        function processDataAndRedraw() {
+            const csvString = csvInput.value;
+            
+            // --- 1. Data Parsing ---
+            data = d3.csvParse(csvString.trim(), d => {
+                const parsed = {
+                    "Effective from date": parseDate(d["Effective from date"]),
+                    "No of supplies": +d["No of supplies"]
+                };
+                
+                const dates = [];
+                if (parsed["Effective from date"]) {
+                    dates.push({ type: "Effective", date: parsed["Effective from date"] });
+                }
+                
+                runTypes.forEach(run => {
+                    const runDate = parseDate(d[run]);
+                    if (runDate) {
+                        parsed[run] = runDate; // Store parsed date
+                        dates.push({ type: run, date: runDate });
+                    }
+                });
+
+                // Sort dates chronologically, as data may be out of order
+                dates.sort((a, b) => a.date - b.date);
+
+                // Now create segments from the sorted dates
+                parsed.segments = [];
+                for (let i = 0; i < dates.length - 1; i++) {
+                    // Check for valid dates and non-negative duration
+                    if (dates[i].date && dates[i+1].date && dates[i].date < dates[i+1].date) {
+                        parsed.segments.push({
+                            runType: dates[i].type, // The period is named after its *start* run
+                            startDate: dates[i].date,
+                            endDate: dates[i + 1].date,
+                            parentData: parsed
+                        });
+                    }
+                }
+
+                // Handle maxDate
+                parsed.maxDate = dates.length > 0 ? dates[dates.length - 1].date : parsed["Effective from date"];
+                return parsed;
+            });
+            
+            // Filter out any rows that failed parsing (e.g., no effective date)
+            data = data.filter(d => d["Effective from date"]);
+
+            // --- Trigger Redraw ---
+            const { width, height } = container.node().getBoundingClientRect();
+            if (width > 0 && height > 0) {
+                drawChart(width, height);
+            }
+        }
+
+
+        /**
+         * The D3 drawing function. Reads from the global 'data' variable.
+         */
+        function drawChart(containerWidth, containerHeight) {
+            // Clear previous chart
+            container.selectAll("svg").remove();
+
+            if (data.length === 0) {
+                 container.append("p").attr("class", "text-slate-500 p-4").text("No valid data to display. Please check the CSV format.");
+                 return;
+            }
+
+            const margin = { top: 40, right: 50, bottom: 60, left: 90 }; // Increased bottom margin from 40 to 60
+            const width = containerWidth - margin.left - margin.right;
+            const height = containerHeight - margin.top - margin.bottom;
+
+            const svg = container.append("svg")
+                .attr("width", containerWidth)
+                .attr("height", containerHeight)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // --- 3. Scales ---
+            
+            // Define Today's Date
+            const today = new Date("2025-10-23T08:30:00"); // Based on provided current time
+
+            // Find the overall min and max dates for the X axis
+            const minDate = d3.min(data, d => d["Effective from date"]);
+            const maxDate = d3.max(data, d => d.maxDate);
+            
+            if (!minDate || !maxDate) {
+                 container.append("p").attr("class", "text-slate-500 p-4").text("Could not determine date range from data.");
+                 return;
+            }
+
+            // X Scale (Time)
+            const xScale = d3.scaleTime()
+                .domain([d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)])
+                .range([0, width]);
+
+            // Y Scale (Categorical)
+            const yScale = d3.scaleBand()
+                .domain(data.map(d => d["Effective from date"]))
+                .range([0, height])
+                .padding(0.4);
+
+            // Color Scale (for Run Types)
+            const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
+                .domain(allPeriodTypes);
+
+            // --- 4. Axes ---
+            const xAxis = d3.axisBottom(xScale).ticks(d3.timeMonth.every(1)).tickFormat(d3.timeFormat("%b %Y"));
+            const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate);
+
+            const xAxisGroup = svg.append("g")
+                .attr("class", "x-axis")
+                .attr("transform", `translate(0, ${height})`)
+                .call(xAxis);
+            
+            xAxisGroup.selectAll("text")
+                .attr("transform", "rotate(-30)")
+                .attr("text-anchor", "end")
+                .attr("dx", "-.5em")
+                .attr("dy", ".5em");
+
+            svg.append("g")
+                .attr("class", "y-axis")
+                .call(yAxis)
+                .selectAll("text")
+                .attr("font-weight", "600");
+
+            // --- 5. Chart Content ---
+            
+            // Create a clipping path to keep content within bounds when zooming
+            svg.append("defs").append("clipPath")
+                .attr("id", "clip")
+                .append("rect")
+                .attr("width", width)
+                .attr("height", height);
+
+            // This 'g' will contain all the chart elements that need to zoom/pan
+            const chartArea = svg.append("g")
+                .attr("clip-path", "url(#clip)");
+
+            // --- 5a. Zoom setup ---
+            const zoom = d3.zoom()
+                .scaleExtent([0.5, 10]) // Min/max zoom level
+                .translateExtent([[0, 0], [width, height]])
+                .extent([[0, 0], [width, height]])
+                .on("zoom", (event) => {
+                    const newXScale = event.transform.rescaleX(xScale);
+                    
+                    // Update X axis
+                    xAxisGroup.call(xAxis.scale(newXScale));
+                    xAxisGroup.selectAll("text")
+                        .attr("transform", "rotate(-30)")
+                        .attr("text-anchor", "end")
+                        .attr("dx", "-.5em")
+                        .attr("dy", ".5em");
+
+                    // Update chart elements
+                    chartArea.selectAll(".run-bar")
+                        .attr("x", d => newXScale(d.startDate))
+                        .attr("width", d => Math.max(0, newXScale(d.endDate) - newXScale(d.startDate))); // Ensure width is not negative
+                    
+                    // Update today marker
+                    updateTodayMarker(newXScale);
+                });
+
+            // Apply zoom behavior to a rect *behind* the bars
+            chartArea.append("rect")
+                .attr("class", "zoom-area")
+                .attr("width", width)
+                .attr("height", height)
+                .style("fill", "none")
+                .style("pointer-events", "all")
+                .call(zoom);
+
+
+            // Create groups for each batch (each row)
+            const batchGroups = chartArea.selectAll(".batch")
+                .data(data, d => d["Effective from date"]) // Use key function for object constancy
+                .enter()
+                .append("g")
+                .attr("class", "batch")
+                .attr("transform", d => `translate(0, ${yScale(d["Effective from date"])})`);
+
+            // Draw the run bars
+            batchGroups.selectAll(".run-bar")
+                .data(d => d.segments) // Bind to the new segments array
+                .enter()
+                .append("rect")
+                .attr("class", "run-bar")
+                .attr("x", d => xScale(d.startDate))
+                .attr("y", 0)
+                .attr("width", d => Math.max(0, xScale(d.endDate) - xScale(d.startDate))) // Ensure width is not negative
+                .attr("height", yScale.bandwidth())
+                .attr("fill", d => colorScale(d.runType))
+                .attr("opacity", d => (today >= d.startDate && today < d.endDate) ? 1.0 : 0.6) // Highlight active
+                .on("mouseover", (event, d) => {
+                    tooltip.style("display", "block")
+                        .html(`
+                            <strong style="color: ${colorScale(d.runType)}">${d.runType} Period</strong><br>
+                            Start: ${formatFullDate(d.startDate)}<br>
+                            End: ${formatFullDate(d.endDate)}<br>
+                            Duration: ${d3.timeDay.count(d.startDate, d.endDate)} days<br>
+                            <hr>
+                            <strong>Batch Info (Effective: ${formatShortDate(d.parentData["Effective from date"])})</strong><br>
+                            Total Supplies: ${d.parentData["No of supplies"]}<br>
+                            <span style="opacity: 0.8; font-size: 0.9em;">
+                                (II) Run: ${d.parentData["(II) Run"] ? formatShortDate(d.parentData["(II) Run"]) : 'N/A'}<br>
+                                SF run: ${d.parentData["SF run"] ? formatShortDate(d.parentData["SF run"]) : 'N/A'}<br>
+                                (R1) Run: ${d.parentData["(R1) Run"] ? formatShortDate(d.parentData["(R1) Run"]) : 'N/A'}<br>
+                                (RF) Run: ${d.parentData["(RF) Run"] ? formatShortDate(d.parentData["(RF) Run"]) : 'N/A'}<br>
+                                (DF) Run: ${d.parentData["(DF) Run"] ? formatShortDate(d.parentData["(DF) Run"]) : 'N/A'}
+                            </span>
+                        `);
+                })
+                .on("mousemove", (event) => {
+                    // Use clientX/Y with position:fixed to prevent page bounce
+                    let left = event.clientX + 15;
+                    let top = event.clientY - 15;
+                    
+                    // Basic boundary check
+                    // Get tooltip dimensions *after* it's been populated by mouseover
+                    const tooltipNode = tooltip.node();
+                    if (tooltipNode) {
+                        const tooltipWidth = tooltipNode.offsetWidth;
+                        const tooltipHeight = tooltipNode.offsetHeight;
+
+                        // If tooltip goes off right edge, flip to left of cursor
+                        if (left + tooltipWidth > window.innerWidth) {
+                            left = event.clientX - tooltipWidth - 15;
+                        }
+                        // If tooltip goes off top edge, flip to bottom of cursor
+                        if (top < 0) {
+                            top = event.clientY + 15;
+                        }
+                        // If tooltip goes off bottom edge, flip to above cursor
+                        if (top + tooltipHeight > window.innerHeight) {
+                            top = event.clientY - tooltipHeight - 15;
+                        }
+                    }
+
+                    tooltip.style("left", left + "px")
+                           .style("top", top + "px");
+                })
+                .on("mouseout", () => {
+                    tooltip.style("display", "none");
+                });
+
+            // --- 5b. Today Marker ---
+            const todayMarker = chartArea.append("g")
+                .attr("class", "today-marker")
+                .style("pointer-events", "none"); // So it doesn't block mouseovers
+
+            todayMarker.append("line")
+                .attr("class", "today-line")
+                .attr("y1", 0)
+                .attr("y2", height)
+                .attr("stroke", "#ef4444") // red-500
+                .attr("stroke-width", 2)
+                .attr("stroke-dasharray", "4 2");
+
+            todayMarker.append("text")
+                .attr("class", "today-text")
+                .attr("x", 4)
+                .attr("y", 15)
+                .attr("text-anchor", "start")
+                .attr("fill", "#ef4444")
+                .attr("font-size", "0.75rem")
+                .attr("font-weight", "600")
+                .text("Today");
+
+            function updateTodayMarker(currentXScale) {
+                const todayX = currentXScale(today);
+                // Check if today is within the visible x-axis range
+                const inRange = todayX >= 0 && todayX <= width;
+                
+                todayMarker.style("display", inRange ? "block" : "none");
+                if (inRange) {
+                    todayMarker.attr("transform", `translate(${todayX}, 0)`);
+                }
+            }
+
+            // Initial update for today marker
+            updateTodayMarker(xScale);
+
+
+            // --- 6. Legend ---
+            const legend = svg.append("g")
+                .attr("class", "legend")
+                .attr("transform", `translate(0, -${margin.top / 2})`);
+
+            const legendItems = legend.selectAll(".legend-item")
+                .data(allPeriodTypes)
+                .enter()
+                .append("g")
+                .attr("class", "legend-item")
+                .attr("transform", (d, i) => `translate(${i * 90}, 0)`); // Spacing
+
+            legendItems.append("rect")
+                .attr("x", 0)
+                .attr("y", -5)
+                .attr("width", 10)
+                .attr("height", 10)
+                .attr("fill", d => colorScale(d));
+
+            legendItems.append("text")
+                .attr("x", 15)
+                .attr("y", 4)
+                .text(d => d)
+                .attr("font-size", "0.75rem")
+                .attr("fill", "#475569");
+        }
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Tab Switching Logic ---
+            const tabChartBtn = document.getElementById('tab-chart');
+            const tabDataBtn = document.getElementById('tab-data');
+            const panelChartEl = document.getElementById('panel-chart');
+            const panelDataEl = document.getElementById('panel-data');
+            
+            const activeTabClasses = 'border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8';
+            const inactiveTabClasses = 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8';
+
+            tabChartBtn.addEventListener('click', () => {
+                tabChartBtn.className = activeTabClasses;
+                tabDataBtn.className = inactiveTabClasses;
+                panelChartEl.className = 'block h-[75vh]';
+                panelDataEl.className = 'hidden h-[75vh] flex flex-col';
+                
+                // Redraw chart in case dimensions changed while hidden
+                const { width, height } = container.node().getBoundingClientRect();
+                if (width > 0 && height > 0 && data.length > 0) {
+                    drawChart(width, height);
+                }
+            });
+
+            tabDataBtn.addEventListener('click', () => {
+                tabDataBtn.className = activeTabClasses;
+                tabChartBtn.className = inactiveTabClasses;
+                panelDataEl.className = 'block h-[75vh] flex flex-col';
+                panelChartEl.className = 'hidden h-[75vh]';
+            });
+            
+            // --- Original Initialization ---
+            
+            // Pre-fill the textarea
+            csvInput.value = initialCsvData.trim();
+            
+            // Initial parse and draw
+            processDataAndRedraw();
+            
+            // Add event listener for the button
+            updateBtn.addEventListener('click', () => {
+                processDataAndRedraw();
+                tabChartBtn.click(); // Switch to chart tab after update
+            });
+            
+            // Add resize observer
+            const resizeObserver = new ResizeObserver(entries => {
+                // Only redraw if the chart panel is visible
+                if (panelChartEl.className.includes('block')) {
+                    const entry = entries[0];
+                    const { width, height } = entry.contentRect;
+                    if (width > 0 && height > 0) {
+                        drawChart(width, height);
+                    }
+                }
+            });
+
+            resizeObserver.observe(container.node());
+        });
+    </script>
+</body>
+</html>
+
+
+
+
+
