@@ -517,7 +517,7 @@
             tabChartBtn.addEventListener('click', () => {
                 tabChartBtn.className = activeTabClasses;
                 tabDataBtn.className = inactiveTabClasses;
-                panelChartEl.className = 'block h-[75vh]';
+                panelChartEl.className = 'flex h-[75vh]'; // <-- Fix: was 'block'
                 panelDataEl.className = 'hidden h-[75vh] flex flex-col';
                 
                 // Redraw chart in case dimensions changed while hidden
@@ -671,7 +671,7 @@
             <!-- Tab Panels -->
             <div class="mt-6">
                 <!-- Chart Panel (visible by default) -->
-                <div id="panel-chart" class="block h-[75vh]">
+                <div id="panel-chart" class="flex h-[75vh]"> <!-- <-- Fix: was 'block' -->
                     <div id="chart-container" class="flex-grow w-full h-full relative border rounded-md border-slate-200"></div>
                 </div>
 
@@ -733,5 +733,6 @@
 
 </body>
 </html>
+
 
 
