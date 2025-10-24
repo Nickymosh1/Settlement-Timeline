@@ -20,18 +20,18 @@
           messagingSenderId: "508924605453",
           appId: "1:508924605453:web:8c765d749c8e5d4c905144"
         };
-        
+
         const appId = firebaseConfig.appId;
-        const initialAuthToken = null; 
+        const initialAuthToken = null;
 
         // --- Global Firebase Vars ---
         let app, auth, db, userId, isAuthReady = false;
         let settlementCollectionRef;
- 
+
         // --- Global App State ---
-        let data = []; 
+        let data = [];
         const today = new Date(); // Define today's date globally
-        
+
         // D3 Selections
         let container, tooltip;
 
@@ -44,6 +44,8 @@
         const formatFullDate = d3.timeFormat("%a, %d %B %Y");
         const formatShortDate = d3.timeFormat("%d/%m/%Y"); // UK Date Format
         const formatHtmlDate = d3.timeFormat("%Y-%m-%d");
+        const formatWeeklyAxis = d3.timeFormat("%d/%m/%y");
+        const formatMonthlyAxis = d3.timeFormat("%b %Y");
 
         /**
          * Helper to parse YYYY-MM-DD string to a JS Date object safely.
@@ -65,7 +67,7 @@
             result.setDate(result.getDate() + days);
             return result;
         }
-        
+
         /**
          * Adds a number of months to a given date.
          */
@@ -75,44 +77,40 @@
             return result;
         }
 
-        // --- NEW: Function to calculate and display stats ---
+        /**
+         * Calculates and displays stats based on current data.
+         */
         function updateStats(data) {
-            // 1. Calculate Total Supplies
             const totalSupplies = data.reduce((acc, d) => acc + (d["No of supplies"] || 0), 0);
             document.getElementById('stat-total').textContent = totalSupplies.toLocaleString('en-GB');
 
-            // 2. Initialize counts for each period
             const counts = { "Pre-Effective": 0 };
-            allPeriodTypes.forEach(p => counts[p] = 0); // "Effective", "(II) Run", etc.
+            allPeriodTypes.forEach(p => counts[p] = 0);
 
-            // 3. Categorize each batch based on today's date
             for (const batch of data) {
                 const supplies = batch["No of supplies"];
-                
-                // Find the latest period this batch is in (checking in reverse)
-                if (today >= batch["(DF) Run"]) counts["(DF) Run"] += supplies;
-                else if (today >= batch["(RF) Run"]) counts["(RF) Run"] += supplies;
-                else if (today >= batch["(R3) Run"]) counts["(R3) Run"] += supplies;
-                else if (today >= batch["(R2) Run"]) counts["(R2) Run"] += supplies;
-                else if (today >= batch["(R1) Run"]) counts["(R1) Run"] += supplies;
-                else if (today >= batch["SSF Run"]) counts["SSF Run"] += supplies;
-                else if (today >= batch["(II) Run"]) counts["(II) Run"] += supplies;
-                else if (today >= batch["Effective from date"]) counts["Effective"] += supplies;
-                else counts["Pre-Effective"] += supplies;
+                let currentPeriod = "Pre-Effective"; // Default
+
+                // Check periods in chronological order to find the latest one 'today' falls into
+                if (batch["Effective from date"] && today >= batch["Effective from date"]) currentPeriod = "Effective";
+                if (batch["(II) Run"] && today >= batch["(II) Run"]) currentPeriod = "(II) Run";
+                if (batch["SSF Run"] && today >= batch["SSF Run"]) currentPeriod = "SSF Run";
+                if (batch["(R1) Run"] && today >= batch["(R1) Run"]) currentPeriod = "(R1) Run";
+                if (batch["(R2) Run"] && today >= batch["(R2) Run"]) currentPeriod = "(R2) Run";
+                if (batch["(R3) Run"] && today >= batch["(R3) Run"]) currentPeriod = "(R3) Run";
+                if (batch["(RF) Run"] && today >= batch["(RF) Run"]) currentPeriod = "(RF) Run";
+                if (batch["(DF) Run"] && today >= batch["(DF) Run"]) currentPeriod = "(DF) Run";
+
+                counts[currentPeriod] += supplies;
             }
 
-            // 4. Update HTML for each stat box
-            allPeriodTypes.forEach(period => {
+            // Update HTML for each stat box including Pre-Effective
+            Object.keys(counts).forEach(period => {
                 const el = document.getElementById(`stat-${period}`);
                 if (el) {
                     el.textContent = counts[period].toLocaleString('en-GB');
                 }
             });
-            // Also update Pre-Effective
-            const preEl = document.getElementById('stat-Pre-Effective');
-            if (preEl) {
-                 preEl.textContent = counts['Pre-Effective'].toLocaleString('en-GB');
-            }
         }
 
 
@@ -129,7 +127,7 @@
             settlementCollectionRef = collection(db, collectionPath);
 
             onSnapshot(settlementCollectionRef, (snapshot) => {
-                
+
                 data = snapshot.docs.map(doc => {
                     const docData = doc.data();
                     const processedData = {
@@ -147,8 +145,7 @@
 
                 data = data.filter(d => d["Effective from date"]);
 
-                // Run all UI updates
-                updateStats(data); // <-- NEW: Update the stats dashboard
+                updateStats(data);
                 processAndDraw();
                 renderManageDataUI();
 
@@ -163,14 +160,14 @@
          */
         function processAndDraw() {
             const processedData = data.map(d => {
-                const parsed = { ...d }; 
+                const parsed = { ...d };
                 const dates = [];
                 if (parsed["Effective from date"]) {
                     dates.push({ type: "Effective", date: parsed["Effective from date"] });
                 }
-                
+
                 runTypes.forEach(run => {
-                    const runDate = parsed[run]; 
+                    const runDate = parsed[run];
                     if (runDate) {
                         dates.push({ type: run, date: runDate });
                     }
@@ -185,34 +182,32 @@
                             runType: dates[i].type,
                             startDate: dates[i].date,
                             endDate: dates[i + 1].date,
-                            parentData: parsed 
+                            parentData: parsed
                         });
                     }
                 }
-                
-                // Add the final segment (e.g., DF Run to infinity)
-                // This is important for the "Today" marker logic
+
                 if (dates.length > 0) {
                     const lastDate = dates[dates.length - 1];
                     parsed.segments.push({
                         runType: lastDate.type,
                         startDate: lastDate.date,
-                        endDate: addMonths(lastDate.date, 24), // Show last period as lasting 2 years
+                        endDate: addMonths(lastDate.date, 24),
                         parentData: parsed
                     });
                 }
-                
+
                 parsed.maxDate = dates.length > 0 ? d3.max(parsed.segments, s => s.endDate) : parsed["Effective from date"];
                 return parsed;
             });
-            
-            if (!container) return; 
+
+            if (!container) return;
             const { width, height } = container.node().getBoundingClientRect();
             if (width > 0 && height > 0) {
                 drawChart(width, height, processedData);
             }
         }
-        
+
         /**
          * Renders the list of batches in the "Manage Data" tab.
          */
@@ -220,8 +215,8 @@
             const listContainer = document.getElementById('batch-list-container');
             if (!listContainer) return;
 
-            listContainer.innerHTML = ''; 
-            
+            listContainer.innerHTML = '';
+
             if (data.length === 0) {
                 listContainer.innerHTML = `<p class="text-slate-500 text-sm">No settlement batches found. Add one using the form above.</p>`;
                 return;
@@ -232,19 +227,19 @@
             sortedData.forEach(batch => {
                 const batchEl = document.createElement('div');
                 batchEl.className = 'bg-slate-50 p-3 rounded-md shadow-sm border border-slate-200 flex justify-between items-center';
-                
+
                 const infoEl = document.createElement('div');
                 infoEl.className = 'text-sm';
                 infoEl.innerHTML = `
                     <strong class="text-slate-700">Effective: ${formatShortDate(batch["Effective from date"])}</strong>
                     <span class="text-slate-500 ml-2">(Supplies: ${batch["No of supplies"]})</span>
                 `;
-                
+
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'text-xs bg-red-100 text-red-700 hover:bg-red-200 px-3 py-1 rounded-md font-medium';
                 deleteBtn.textContent = 'Delete';
                 deleteBtn.dataset.id = batch.id;
-                
+
                 deleteBtn.addEventListener('click', async () => {
                     if (confirm(`Are you sure you want to delete the batch for ${formatShortDate(batch["Effective from date"])}?`)) {
                         const id = deleteBtn.dataset.id;
@@ -257,7 +252,7 @@
                         }
                     }
                 });
-                
+
                 batchEl.appendChild(infoEl);
                 batchEl.appendChild(deleteBtn);
                 listContainer.appendChild(batchEl);
@@ -271,7 +266,7 @@
             event.preventDefault();
             const form = event.target;
             const formData = new FormData(form);
-            
+
             try {
                 const effectiveDate = parseHtmlDate(formData.get("effectiveDate"));
                 if (!effectiveDate) {
@@ -294,7 +289,7 @@
 
                 // Add to Firestore
                 await addDoc(settlementCollectionRef, newBatch);
-                
+
                 form.reset();
 
             } catch (error) {
@@ -308,7 +303,7 @@
          */
         function drawChart(containerWidth, containerHeight, chartData) {
             container.selectAll("svg").remove();
-            container.selectAll("p").remove(); 
+            container.selectAll("p").remove();
 
             if (chartData.length === 0) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("No valid data to display. Add data in the 'Manage Data' tab.");
@@ -326,16 +321,14 @@
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
             // --- 3. Scales ---
-            
             const minDate = d3.min(chartData, d => d["Effective from date"]);
             const maxDate = d3.max(chartData, d => d.maxDate);
-            
+
             if (!minDate || !maxDate) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("Could not determine date range from data.");
                  return;
             }
-            
-            // Give 1 month padding on either side
+
             const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)];
 
             const xScale = d3.scaleTime()
@@ -351,23 +344,24 @@
                 .domain(allPeriodTypes);
 
             // --- 4. Axes ---
-            // --- UPDATED X-AXIS: Ticks every week, formatted as dd/mm/yy ---
+            // Initial setup defaults to weekly, zoom handler will adjust
             const xAxis = d3.axisBottom(xScale)
-                .ticks(d3.timeWeek.every(1))
-                .tickFormat(d3.timeFormat("%d/%m/%y"));
-            
+                            .ticks(d3.timeWeek.every(1))
+                            .tickFormat(formatWeeklyAxis);
+
             const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate); // Uses UK format
 
             const xAxisGroup = svg.append("g")
                 .attr("class", "x-axis")
                 .attr("transform", `translate(0, ${height})`)
                 .call(xAxis);
-            
+
+            // Apply initial rotation
             xAxisGroup.selectAll("text")
                 .attr("transform", "rotate(-30)")
                 .attr("text-anchor", "end")
                 .attr("dx", "-.5em")
-                .attr("dy", ".8em"); // Added more space for new date format
+                .attr("dy", ".8em");
 
             svg.append("g")
                 .attr("class", "y-axis")
@@ -385,24 +379,40 @@
             const chartArea = svg.append("g")
                 .attr("clip-path", "url(#clip)");
 
+            // --- Zoom Handler with Dynamic Axis ---
             const zoom = d3.zoom()
-                .scaleExtent([0.5, 10]) 
-                .translateExtent([[0, 0], [width, height]]) 
+                .scaleExtent([0.5, 10])
+                .translateExtent([[0, 0], [width, height]])
                 .extent([[0, 0], [width, height]])
                 .on("zoom", (event) => {
                     const newXScale = event.transform.rescaleX(xScale);
-                    
-                    xAxisGroup.call(xAxis.scale(newXScale));
+
+                    // --- Dynamic Axis Logic ---
+                    const currentDomain = newXScale.domain();
+                    const timeSpanDays = d3.timeDay.count(currentDomain[0], currentDomain[1]);
+                    const zoomThresholdDays = 180; // Approx 6 months
+
+                    if (timeSpanDays > zoomThresholdDays) {
+                        // Zoomed Out: Show monthly ticks
+                        xAxisGroup.call(xAxis.scale(newXScale).ticks(d3.timeMonth.every(1)).tickFormat(formatMonthlyAxis));
+                    } else {
+                        // Zoomed In: Show weekly ticks
+                        xAxisGroup.call(xAxis.scale(newXScale).ticks(d3.timeWeek.every(1)).tickFormat(formatWeeklyAxis));
+                    }
+                    // --- End Dynamic Axis Logic ---
+
+                    // Reapply rotation after calling axis
                     xAxisGroup.selectAll("text")
                         .attr("transform", "rotate(-30)")
                         .attr("text-anchor", "end")
                         .attr("dx", "-.5em")
                         .attr("dy", ".8em");
 
+                    // Update chart elements
                     chartArea.selectAll(".run-bar")
                         .attr("x", d => newXScale(d.startDate))
                         .attr("width", d => Math.max(0, newXScale(d.endDate) - newXScale(d.startDate)));
-                    
+
                     updateTodayMarker(newXScale);
                 });
 
@@ -415,7 +425,7 @@
                 .call(zoom);
 
             const batchGroups = chartArea.selectAll(".batch")
-                .data(chartData, d => d.id) 
+                .data(chartData, d => d.id)
                 .enter()
                 .append("g")
                 .attr("class", "batch")
@@ -442,7 +452,7 @@
                             <hr>
                             <strong>Batch Info (Effective: ${formatShortDate(d.parentData["Effective from date"])})</strong><br>
                             Total Supplies: ${d.parentData["No of supplies"]}<br>
-                            
+
                             <span style="opacity: 0.8; font-size: 0.9em;">
                                 (II) Run: ${d.parentData["(II) Run"] ? formatShortDate(d.parentData["(II) Run"]) : 'N/A'}<br>
                                 SSF Run: ${d.parentData["SSF Run"] ? formatShortDate(d.parentData["SSF Run"]) : 'N/A'}<br>
@@ -457,7 +467,7 @@
                 .on("mousemove", (event) => {
                     let left = event.clientX + 15;
                     let top = event.clientY - 15;
-                    
+
                     const tooltipNode = tooltip.node();
                     if (tooltipNode) {
                         const tooltipWidth = tooltipNode.offsetWidth;
@@ -514,7 +524,7 @@
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
-                .attr("transform", (d, i) => `translate(${i * 80}, 0)`); 
+                .attr("transform", (d, i) => `translate(${i * 80}, 0)`);
 
             legendItems.append("rect")
                 .attr("x", 0)
@@ -541,7 +551,7 @@
             const tabDataBtn = document.getElementById('tab-data');
             const panelChartEl = document.getElementById('panel-chart');
             const panelDataEl = document.getElementById('panel-data');
-            
+
             const activeTabClasses = 'border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8';
             const inactiveTabClasses = 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8';
 
@@ -550,7 +560,7 @@
                 tabDataBtn.className = inactiveTabClasses;
                 panelChartEl.className = 'flex h-[75vh]';
                 panelDataEl.className = 'hidden h-[75vh] flex flex-col';
-                
+
                 const { width, height } = container.node().getBoundingClientRect();
                 if (width > 0 && height > 0 && data.length > 0) {
                     processAndDraw();
@@ -563,11 +573,11 @@
                 panelDataEl.className = 'block h-[75vh] flex flex-col';
                 panelChartEl.className = 'hidden h-[75vh]';
             });
-            
+
             // --- Add Batch Form Logic ---
             const addBatchForm = document.getElementById('add-batch-form');
             addBatchForm.addEventListener('submit', handleAddBatch);
-            
+
             // --- Firebase Initialization ---
             try {
                 if (!firebaseConfig.appId) {
@@ -577,14 +587,14 @@
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
-                setFirestoreLogLevel('debug'); 
+                setFirestoreLogLevel('debug');
 
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
                         console.log("Auth state ready, user ID:", userId);
-                        setupFirestoreListener(); 
+                        setupFirestoreListener();
                     } else {
                         isAuthReady = false;
                         userId = null;
@@ -599,7 +609,7 @@
                 console.error("Firebase initialization failed:", error);
                 container.append("p").attr("class", "text-red-500 p-4").text("Error: Could not connect to data storage. " + error.message);
             }
-            
+
             // --- Resize Observer ---
             const resizeObserver = new ResizeObserver(entries => {
                 if (!panelChartEl.classList.contains('hidden')) {
@@ -634,14 +644,14 @@
             cursor: pointer;
         }
         #tooltip hr {
-            border-top: 1px solid #475569; 
+            border-top: 1px solid #475569;
             margin-top: 4px;
             margin-bottom: 4px;
         }
         #chart-container {
             min-height: 400px;
         }
-        
+
         #add-batch-form .form-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -670,46 +680,46 @@
     <div class="bg-white rounded-lg shadow-xl p-4 md:p-6 w-full max-w-7xl mx-auto flex flex-col min-h-[90vh]">
         <h1 class="text-2xl font-bold text-slate-800 mb-4">Settlement Runs Timeline</h1>
 
-        <div id="stats-bar" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3 mb-4">
-            <div class="bg-blue-50 p-3 rounded-lg shadow-md">
-                <h3 class="text-sm font-medium text-blue-600 truncate">Total Supplies</h3>
-                <p id="stat-total" class="text-2xl md:text-3xl font-bold text-blue-900">-</p>
+        <div id="stats-bar" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-3 mb-6 border-b pb-4">
+            <div class="bg-blue-50 p-3 rounded-lg shadow-md border border-blue-200">
+                <h3 class="text-xs font-semibold text-blue-700 truncate uppercase tracking-wider">Total Supplies</h3>
+                <p id="stat-total" class="mt-1 text-xl md:text-2xl font-bold text-blue-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">Pre-Effective</h3>
-                <p id="stat-Pre-Effective" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">Pre-Effective</h3>
+                <p id="stat-Pre-Effective" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">Effective</h3>
-                <p id="stat-Effective" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">Effective</h3>
+                <p id="stat-Effective" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">(II) Run</h3>
-                <p id="stat-(II) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">(II) Run</h3>
+                <p id="stat-(II) Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">SSF Run</h3>
-                <p id="stat-SSF Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">SSF Run</h3>
+                <p id="stat-SSF Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">(R1) Run</h3>
-                <p id="stat-(R1) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">(R1) Run</h3>
+                <p id="stat-(R1) Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">(R2) Run</h3>
-                <p id="stat-(R2) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">(R2) Run</h3>
+                <p id="stat-(R2) Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">(R3) Run</h3>
-                <p id="stat-(R3) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">(R3) Run</h3>
+                <p id="stat-(R3) Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">(RF) Run</h3>
-                <p id="stat-(RF) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">(RF) Run</h3>
+                <p id="stat-(RF) Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
-            <div class="bg-gray-50 p-3 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-600 truncate">(DF) Run</h3>
-                <p id="stat-(DF) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 truncate uppercase tracking-wider">(DF) Run</h3>
+                <p id="stat-(DF) Run" class="mt-1 text-xl md:text-2xl font-bold text-slate-900">-</p>
             </div>
         </div>
         <div class="mt-4">
@@ -730,7 +740,7 @@
                 </div>
 
                 <div id="panel-data" class="hidden h-[75vh] flex flex-col">
-                    
+
                     <h2 class="text-lg font-semibold text-slate-700 mb-2">Add New Batch</h2>
                     <form id="add-batch-form" class="mb-6 p-4 border border-slate-200 rounded-lg bg-slate-50">
                         <div class="form-grid">
