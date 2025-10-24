@@ -115,7 +115,7 @@
                 return;
             }
 
-            const collectionPath = `/artifacts/${appId}/users/${userId}/settlement_batches`;
+            const collectionPath = `/artifacts/${appId}/shared_settlement_batches`;
             settlementCollectionRef = collection(db, collectionPath);
 
             onSnapshot(settlementCollectionRef, (snapshot) => {
