@@ -177,27 +177,21 @@
 
                 parsed.segments = [];
                 for (let i = 0; i < dates.length - 1; i++) {
+                    // Check if both dates are valid and start date is before end date
                     if (dates[i].date && dates[i+1].date && dates[i].date < dates[i+1].date) {
                         parsed.segments.push({
                             runType: dates[i].type,
                             startDate: dates[i].date,
-                            endDate: dates[i + 1].date,
+                            endDate: dates[i + 1].date, // The next run date is the end date
                             parentData: parsed
                         });
                     }
                 }
-
-                if (dates.length > 0) {
-                    const lastDate = dates[dates.length - 1];
-                    parsed.segments.push({
-                        runType: lastDate.type,
-                        startDate: lastDate.date,
-                        endDate: addMonths(lastDate.date, 24),
-                        parentData: parsed
-                    });
-                }
-
-                parsed.maxDate = dates.length > 0 ? d3.max(parsed.segments, s => s.endDate) : parsed["Effective from date"];
+                
+                // --- CHANGE 1: Determine maxDate based only on existing run dates ---
+                // The max date is now simply the date of the last defined run.
+                parsed.maxDate = dates.length > 0 ? dates[dates.length - 1].date : parsed["Effective from date"];
+                
                 return parsed;
             });
 
@@ -303,7 +297,7 @@
          */
         function drawChart(containerWidth, containerHeight, chartData) {
             container.selectAll("svg").remove();
-            container.selectAll("p").remove(); 
+            container.selectAll("p").remove();
 
             if (chartData.length === 0) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("No valid data to display. Add data in the 'Manage Data' tab.");
@@ -322,17 +316,16 @@
 
             // --- 3. Scales ---
             const minDate = d3.min(chartData, d => d["Effective from date"]);
-            // --- NEW: Calculate max based on latest effective date + buffer ---
-            const maxEffectiveDate = d3.max(chartData, d => d["Effective from date"]);
-            const initialMaxDate = addMonths(maxEffectiveDate || new Date(), 36); // Use latest effective date + 3 years as default max view
+            // Use the calculated maxDate which is the date of the last run (DF Run)
+            const maxDateOverall = d3.max(chartData, d => d.maxDate); 
 
-            if (!minDate || !initialMaxDate) { // Check initialMaxDate now
+            if (!minDate || !maxDateOverall) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("Could not determine date range from data.");
                  return;
             }
             
-            // --- UPDATED: Use initialMaxDate for the default domain ---
-            const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(initialMaxDate)];
+            // Initial domain: From first effective date to last DF Run date + a bit of padding
+            const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDateOverall)];
 
             const xScale = d3.scaleTime()
                 .domain(dateDomain)
@@ -347,9 +340,10 @@
                 .domain(allPeriodTypes);
 
             // --- 4. Axes ---
+            // Initial setup defaults to weekly, zoom handler will adjust
             const xAxis = d3.axisBottom(xScale)
-                            .ticks(d3.timeWeek.every(1)) // Default to weekly
-                            .tickFormat(formatWeeklyAxis); // Default format
+                            .ticks(d3.timeWeek.every(1))
+                            .tickFormat(formatWeeklyAxis);
 
             const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate); // Uses UK format
 
@@ -381,28 +375,32 @@
             const chartArea = svg.append("g")
                 .attr("clip-path", "url(#clip)");
 
-            // --- Zoom Handler with Dynamic Axis ---
+            // --- Zoom Handler with Dynamic Axis Ticks ---
             const zoom = d3.zoom()
                 .scaleExtent([0.1, 10]) // Allow zooming out further if needed
-                .translateExtent([[0, 0], [width, height]]) 
+                .translateExtent([[-width, -height], [width * 2, height * 2]]) // More generous panning
                 .extent([[0, 0], [width, height]])
-                 // --- NEW: Set initial zoom/pan state (optional, can fine-tune) ---
                 .on("zoom", (event) => {
                     const newXScale = event.transform.rescaleX(xScale);
 
-                    // --- Dynamic Axis Logic ---
+                    // --- CHANGE 2: Dynamic Axis Ticks Logic ---
                     const currentDomain = newXScale.domain();
                     const timeSpanDays = d3.timeDay.count(currentDomain[0], currentDomain[1]);
-                    const zoomThresholdDays = 180; // Approx 6 months
+                    
+                    let tickInterval = d3.timeWeek.every(1);
+                    let tickFormat = formatWeeklyAxis;
 
-                    if (timeSpanDays > zoomThresholdDays) {
-                        // Zoomed Out: Show monthly ticks
-                        xAxisGroup.call(xAxis.scale(newXScale).ticks(d3.timeMonth.every(1)).tickFormat(formatMonthlyAxis));
-                    } else {
-                        // Zoomed In: Show weekly ticks
-                        xAxisGroup.call(xAxis.scale(newXScale).ticks(d3.timeWeek.every(1)).tickFormat(formatWeeklyAxis));
-                    }
-                    // --- End Dynamic Axis Logic ---
+                    if (timeSpanDays > 730) { // More than 2 years visible
+                        tickInterval = d3.timeMonth.every(3); // Ticks every 3 months
+                        tickFormat = formatMonthlyAxis;
+                    } else if (timeSpanDays > 180) { // More than 6 months visible
+                        tickInterval = d3.timeMonth.every(1); // Ticks every 1 month
+                        tickFormat = formatMonthlyAxis;
+                    } 
+                    // else: Less than 6 months, keep weekly (already set)
+
+                    xAxisGroup.call(xAxis.scale(newXScale).ticks(tickInterval).tickFormat(tickFormat));
+                    // --- End Dynamic Axis Ticks Logic ---
 
                     // Reapply rotation after calling axis
                     xAxisGroup.selectAll("text")
@@ -415,7 +413,7 @@
                     chartArea.selectAll(".run-bar")
                         .attr("x", d => newXScale(d.startDate))
                         .attr("width", d => Math.max(0, newXScale(d.endDate) - newXScale(d.startDate)));
-                    
+
                     updateTodayMarker(newXScale);
                 });
 
@@ -428,7 +426,7 @@
                 .call(zoom);
 
             const batchGroups = chartArea.selectAll(".batch")
-                .data(chartData, d => d.id) 
+                .data(chartData, d => d.id)
                 .enter()
                 .append("g")
                 .attr("class", "batch")
@@ -455,7 +453,7 @@
                             <hr>
                             <strong>Batch Info (Effective: ${formatShortDate(d.parentData["Effective from date"])})</strong><br>
                             Total Supplies: ${d.parentData["No of supplies"]}<br>
-                            
+
                             <span style="opacity: 0.8; font-size: 0.9em;">
                                 (II) Run: ${d.parentData["(II) Run"] ? formatShortDate(d.parentData["(II) Run"]) : 'N/A'}<br>
                                 SSF Run: ${d.parentData["SSF Run"] ? formatShortDate(d.parentData["SSF Run"]) : 'N/A'}<br>
@@ -470,7 +468,7 @@
                 .on("mousemove", (event) => {
                     let left = event.clientX + 15;
                     let top = event.clientY - 15;
-                    
+
                     const tooltipNode = tooltip.node();
                     if (tooltipNode) {
                         const tooltipWidth = tooltipNode.offsetWidth;
@@ -527,7 +525,7 @@
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
-                .attr("transform", (d, i) => `translate(${i * 80}, 0)`); 
+                .attr("transform", (d, i) => `translate(${i * 80}, 0)`);
 
             legendItems.append("rect")
                 .attr("x", 0)
@@ -610,12 +608,16 @@
 
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
-                container.append("p").attr("class", "text-red-500 p-4").text("Error: Could not connect to data storage. " + error.message);
+                if (container) { // Check if container exists before appending
+                     container.append("p").attr("class", "text-red-500 p-4").text("Error: Could not connect to data storage. " + error.message);
+                } else {
+                     console.error("Could not display Firebase error in container element.");
+                }
             }
 
             // --- Resize Observer ---
             const resizeObserver = new ResizeObserver(entries => {
-                if (!panelChartEl.classList.contains('hidden')) {
+                if (container && !panelChartEl.classList.contains('hidden')) { // Check container exists
                     const entry = entries[0];
                     const { width, height } = entry.contentRect;
                     if (width > 0 && height > 0) {
@@ -623,7 +625,12 @@
                     }
                 }
             });
-            resizeObserver.observe(container.node());
+            // Ensure container exists before observing
+            if (container) {
+                resizeObserver.observe(container.node());
+            } else {
+                 console.error("Chart container not found for resize observer.");
+            }
         });
     </script>
     <style>
@@ -676,6 +683,21 @@
             font-size: 0.875rem;
             padding: 0.5rem 0.75rem;
         }
+         /* Style for smaller text on stats */
+        #stats-bar h3 {
+             font-size: 0.65rem; /* Smaller text for stat titles */
+        }
+        #stats-bar p {
+             font-size: 1.25rem; /* Slightly smaller numbers */
+             line-height: 1.5rem;
+        }
+        /* Adjust grid for 10 items */
+        @media (min-width: 1280px) { /* xl breakpoint */
+             #stats-bar {
+                 grid-template-columns: repeat(10, 1fr);
+             }
+        }
+
     </style>
 </head>
 <body class="bg-slate-50 h-full p-4 md:p-8">
