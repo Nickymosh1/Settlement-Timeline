@@ -303,7 +303,7 @@
          */
         function drawChart(containerWidth, containerHeight, chartData) {
             container.selectAll("svg").remove();
-            container.selectAll("p").remove();
+            container.selectAll("p").remove(); 
 
             if (chartData.length === 0) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("No valid data to display. Add data in the 'Manage Data' tab.");
@@ -322,14 +322,17 @@
 
             // --- 3. Scales ---
             const minDate = d3.min(chartData, d => d["Effective from date"]);
-            const maxDate = d3.max(chartData, d => d.maxDate);
+            // --- NEW: Calculate max based on latest effective date + buffer ---
+            const maxEffectiveDate = d3.max(chartData, d => d["Effective from date"]);
+            const initialMaxDate = addMonths(maxEffectiveDate || new Date(), 36); // Use latest effective date + 3 years as default max view
 
-            if (!minDate || !maxDate) {
+            if (!minDate || !initialMaxDate) { // Check initialMaxDate now
                  container.append("p").attr("class", "text-slate-500 p-4").text("Could not determine date range from data.");
                  return;
             }
-
-            const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)];
+            
+            // --- UPDATED: Use initialMaxDate for the default domain ---
+            const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(initialMaxDate)];
 
             const xScale = d3.scaleTime()
                 .domain(dateDomain)
@@ -344,10 +347,9 @@
                 .domain(allPeriodTypes);
 
             // --- 4. Axes ---
-            // Initial setup defaults to weekly, zoom handler will adjust
             const xAxis = d3.axisBottom(xScale)
-                            .ticks(d3.timeWeek.every(1))
-                            .tickFormat(formatWeeklyAxis);
+                            .ticks(d3.timeWeek.every(1)) // Default to weekly
+                            .tickFormat(formatWeeklyAxis); // Default format
 
             const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate); // Uses UK format
 
@@ -381,9 +383,10 @@
 
             // --- Zoom Handler with Dynamic Axis ---
             const zoom = d3.zoom()
-                .scaleExtent([0.5, 10])
-                .translateExtent([[0, 0], [width, height]])
+                .scaleExtent([0.1, 10]) // Allow zooming out further if needed
+                .translateExtent([[0, 0], [width, height]]) 
                 .extent([[0, 0], [width, height]])
+                 // --- NEW: Set initial zoom/pan state (optional, can fine-tune) ---
                 .on("zoom", (event) => {
                     const newXScale = event.transform.rescaleX(xScale);
 
@@ -412,7 +415,7 @@
                     chartArea.selectAll(".run-bar")
                         .attr("x", d => newXScale(d.startDate))
                         .attr("width", d => Math.max(0, newXScale(d.endDate) - newXScale(d.startDate)));
-
+                    
                     updateTodayMarker(newXScale);
                 });
 
@@ -425,7 +428,7 @@
                 .call(zoom);
 
             const batchGroups = chartArea.selectAll(".batch")
-                .data(chartData, d => d.id)
+                .data(chartData, d => d.id) 
                 .enter()
                 .append("g")
                 .attr("class", "batch")
@@ -452,7 +455,7 @@
                             <hr>
                             <strong>Batch Info (Effective: ${formatShortDate(d.parentData["Effective from date"])})</strong><br>
                             Total Supplies: ${d.parentData["No of supplies"]}<br>
-
+                            
                             <span style="opacity: 0.8; font-size: 0.9em;">
                                 (II) Run: ${d.parentData["(II) Run"] ? formatShortDate(d.parentData["(II) Run"]) : 'N/A'}<br>
                                 SSF Run: ${d.parentData["SSF Run"] ? formatShortDate(d.parentData["SSF Run"]) : 'N/A'}<br>
@@ -467,7 +470,7 @@
                 .on("mousemove", (event) => {
                     let left = event.clientX + 15;
                     let top = event.clientY - 15;
-
+                    
                     const tooltipNode = tooltip.node();
                     if (tooltipNode) {
                         const tooltipWidth = tooltipNode.offsetWidth;
@@ -524,7 +527,7 @@
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
-                .attr("transform", (d, i) => `translate(${i * 80}, 0)`);
+                .attr("transform", (d, i) => `translate(${i * 80}, 0)`); 
 
             legendItems.append("rect")
                 .attr("x", 0)
