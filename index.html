@@ -37,6 +37,7 @@
 
         // --- Global Setup: Updated Run Types ---
         const runTypes = ["(II) Run", "SSF Run", "(R1) Run", "(R2) Run", "(R3) Run", "(RF) Run", "(DF) Run"];
+        // Note: (DF) Run might not appear as a bar color now, but is still needed for calculations/domain
         const allPeriodTypes = ["Effective", "(II) Run", "SSF Run", "(R1) Run", "(R2) Run", "(R3) Run", "(RF) Run", "(DF) Run"];
 
         // D3 Formatters
@@ -48,7 +49,7 @@
         const formatMonthlyAxis = d3.timeFormat("%b %Y");
         const formatYearlyAxis = d3.timeFormat("%Y");
 
-        // --- NEW: Color Palette ---
+        // --- Color Palette ---
         const colors = {
             eonRed: "#FF4822",
             birch: "#FAF6F4",
@@ -59,12 +60,10 @@
             sun: "#FFDE00",
             cloud: "#00E3FF",
             gasOff: "#9254FF",
-            // Using eonRed and gasOff again for missing colors
-            color7: "#FF4822", // Map to R3 Run
-            color8: "#9254FF"  // Map to DF Run (using Gas Off again)
         };
 
-        // --- NEW: Data Color Scale ---
+        // --- Data Color Scale ---
+        // --- CHANGE 1: Updated DF Run color ---
         const dataColorScale = d3.scaleOrdinal()
             .domain(allPeriodTypes)
             .range([
@@ -73,9 +72,9 @@
                 colors.sun,    // SSF Run
                 colors.cloud,  // (R1) Run
                 colors.gasOff, // (R2) Run
-                colors.color7, // (R3) Run - Using eonRed
+                colors.eonRed, // (R3) Run - Using eonRed
                 colors.flash,  // (RF) Run - Reusing flash
-                colors.color8  // (DF) Run - Reusing gasOff
+                colors.darkPurple // (DF) Run - Now Dark Purple (used for marker)
              ]);
 
 
@@ -207,6 +206,7 @@
                 dates.sort((a, b) => a.date - b.date);
 
                 parsed.segments = [];
+                // --- CHANGE 2: Loop stops *before* the last date (DF Run) ---
                 for (let i = 0; i < dates.length - 1; i++) {
                     if (dates[i].date && dates[i+1].date && dates[i].date < dates[i+1].date) {
                         parsed.segments.push({
@@ -218,7 +218,7 @@
                     }
                 }
 
-                // Max date is the date of the last defined run.
+                // Max date is still the date of the last defined run (DF Run)
                 parsed.maxDate = dates.length > 0 ? dates[dates.length - 1].date : parsed["Effective from date"];
 
                 return parsed;
@@ -261,13 +261,11 @@
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'text-xs px-3 py-1 rounded-md font-medium';
-                // Using Red for text, lighter red for background
                 deleteBtn.style.color = colors.eonRed;
                 deleteBtn.style.backgroundColor = 'rgba(255, 72, 34, 0.1)';
                 deleteBtn.textContent = 'Delete';
                 deleteBtn.dataset.id = batch.id;
 
-                 // Hover effect
                 deleteBtn.onmouseover = () => { deleteBtn.style.backgroundColor = 'rgba(255, 72, 34, 0.2)'; };
                 deleteBtn.onmouseout = () => { deleteBtn.style.backgroundColor = 'rgba(255, 72, 34, 0.1)'; };
 
@@ -367,7 +365,7 @@
                  return;
             }
 
-            // --- CHANGE 2: Define domain based on actual data + 1 month buffer ---
+            // Define domain based on actual data + 1 month buffer
             const minDateBuffered = d3.timeMonth.offset(minDate, -1);
             const maxDateBuffered = d3.timeMonth.offset(maxDateOverall, 1);
             const dateDomain = [minDateBuffered, maxDateBuffered];
@@ -382,7 +380,7 @@
                 .padding(0.4);
 
             // --- 4. Axes ---
-            // --- CHANGE 1: Initial setup defaults to YEARLY ticks ---
+            // Initial setup defaults to YEARLY ticks
             const xAxis = d3.axisBottom(xScale)
                             .ticks(d3.timeYear.every(1))
                             .tickFormat(formatYearlyAxis);
@@ -416,12 +414,11 @@
             const chartArea = svg.append("g")
                 .attr("clip-path", "url(#clip)");
 
-            // --- CHANGE 3: Set translateExtent based on buffered domain ---
+            // --- Zoom Handler with Dynamic Axis Ticks ---
             const zoom = d3.zoom()
                 .scaleExtent([0.1, 10])
-                // Restrict panning to slightly beyond the actual data range
                 .translateExtent([
-                    [xScale(minDateBuffered), -Infinity], // Allow vertical panning freely
+                    [xScale(minDateBuffered), -Infinity],
                     [xScale(maxDateBuffered), Infinity]
                  ])
                 .extent([[0, 0], [width, height]])
@@ -453,10 +450,14 @@
                         .attr("dx", "-.5em")
                         .attr("dy", ".8em");
 
-                    // Update chart elements
+                    // Update chart elements (bars and end markers)
                     chartArea.selectAll(".run-bar")
                         .attr("x", d => newXScale(d.startDate))
                         .attr("width", d => Math.max(0, newXScale(d.endDate) - newXScale(d.startDate)));
+
+                    // --- CHANGE 3b: Update end marker position on zoom ---
+                    chartArea.selectAll(".end-marker")
+                         .attr("x", d => newXScale(d["(DF) Run"]) - 3); // Recalculate x based on new scale, keep centered
 
                     updateTodayMarker(newXScale);
                 });
@@ -476,8 +477,9 @@
                 .attr("class", "batch")
                 .attr("transform", d => `translate(0, ${yScale(d["Effective from date"])})`);
 
+            // Draw the bars for all segments EXCEPT the last one (DF Run)
             batchGroups.selectAll(".run-bar")
-                .data(d => d.segments)
+                .data(d => d.segments) // Segments array now excludes DF run start
                 .enter()
                 .append("rect")
                 .attr("class", "run-bar")
@@ -527,6 +529,42 @@
                     tooltip.style("display", "none");
                 });
 
+             // --- CHANGE 3a: Add the End Marker (DF Run date) ---
+             batchGroups.append("rect")
+                .attr("class", "end-marker")
+                .attr("x", d => xScale(d["(DF) Run"]) - 3) // Center the 6px square on the date
+                .attr("y", (yScale.bandwidth() - 6) / 2) // Center vertically
+                .attr("width", 6)
+                .attr("height", 6)
+                .attr("fill", colors.darkPurple) // Use Dark Purple
+                .style("pointer-events", "all") // Ensure it can receive hover events
+                 .on("mouseover", (event, d) => {
+                    tooltip.style("display", "block")
+                        .html(`
+                            <strong>Dispute Final (DF) Run</strong><br>
+                            Date: ${formatFullDate(d["(DF) Run"])}<br>
+                            <hr>
+                            Batch Effective: ${formatShortDate(d["Effective from date"])}
+                        `);
+                })
+                 .on("mousemove", (event) => { // Re-add mousemove for positioning
+                    let left = event.clientX + 15;
+                    let top = event.clientY - 15;
+                    const tooltipNode = tooltip.node();
+                    if (tooltipNode) {
+                        const tooltipWidth = tooltipNode.offsetWidth;
+                        const tooltipHeight = tooltipNode.offsetHeight;
+                        if (left + tooltipWidth > window.innerWidth) left = event.clientX - tooltipWidth - 15;
+                        if (top < 0) top = event.clientY + 15;
+                        if (top + tooltipHeight > window.innerHeight) top = event.clientY - tooltipHeight - 15;
+                    }
+                    tooltip.style("left", left + "px").style("top", top + "px");
+                })
+                .on("mouseout", () => {
+                    tooltip.style("display", "none");
+                });
+
+
             // --- 5b. Today Marker ---
             const todayMarker = chartArea.append("g")
                 .attr("class", "today-marker")
@@ -551,6 +589,7 @@
 
             function updateTodayMarker(currentXScale) {
                 const todayX = currentXScale(today);
+                // Only display if within the visible chart area width
                 const inRange = todayX >= 0 && todayX <= width;
                 todayMarker.style("display", inRange ? "block" : "none");
                 if (inRange) {
@@ -560,12 +599,14 @@
             updateTodayMarker(xScale);
 
             // --- 6. Legend ---
+            // Filter out DF Run from legend as it's now just a marker
+            const legendData = allPeriodTypes.filter(p => p !== "(DF) Run");
             const legend = svg.append("g")
                 .attr("class", "legend")
                 .attr("transform", `translate(0, -${margin.top / 2})`);
 
             const legendItems = legend.selectAll(".legend-item")
-                .data(allPeriodTypes)
+                .data(legendData) // Use filtered data
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
@@ -576,7 +617,7 @@
                 .attr("y", -5)
                 .attr("width", 10)
                 .attr("height", 10)
-                .attr("fill", d => dataColorScale(d)); // Use new data color scale
+                .attr("fill", d => dataColorScale(d)); // Use data color scale
 
             legendItems.append("text")
                 .attr("x", 15)
@@ -709,7 +750,7 @@
             fill: #64748b; /* slate-500 for axis text */
             font-size: 0.75rem;
         }
-        .run-bar:hover {
+        .run-bar:hover, .end-marker:hover { /* Apply hover to end marker too */
             opacity: 0.8;
             cursor: pointer;
         }
