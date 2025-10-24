@@ -7,9 +7,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script type="module">
-        import { initializeApp } from "https.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // --- THIS BLOCK IS NOW CORRECTED ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Firebase/App Config ---
         const firebaseConfig = {
@@ -525,7 +526,8 @@
                 db = getFirestore(app);
                 setFirestoreLogLevel('debug'); 
 
-                onAuthStateCHanged(auth, (user) => {
+                // *** THIS TYPO IS NOW FIXED ***
+                onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
@@ -618,7 +620,7 @@
         <p class="text-sm text-slate-500 mb-4">
             Each row shows a batch of supplies. Colored bars represent the time period between settlement runs.<br>
             Active periods are highlighted (opacity 100%). The red line indicates "Today". You can zoom and pan.
-        </p> <div class="mt-4">
+        </g> <div class="mt-4">
             <div class="border-b border-slate-200">
                 <nav class="flex -mb-px" aria-label="Tabs">
                     <button id="tab-chart" class="border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8">
