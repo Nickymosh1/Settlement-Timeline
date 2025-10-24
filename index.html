@@ -4,20 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settlement Runs Timeline</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load D3.js -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
-    <!-- Firebase Libraries -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Firebase/App Config ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // This is your project's unique configuration
+        const firebaseConfig = {
+          apiKey: "AIzaSyBMVUAeKxRu83Pi6eng5my26bgLmVYe09U",
+          authDomain: "settlement-timeline.firebaseapp.com",
+          projectId: "settlement-timeline",
+          storageBucket: "settlement-timeline.firebasestorage.app",
+          messagingSenderId: "508924605453",
+          appId: "1:508924605453:web:8c765d749c8e5d4c905144"
+        };
+        
+        // These lines now read from the config object above
+        const appId = firebaseConfig.appId;
+        const initialAuthToken = null; // We are using anonymous auth
 
         // --- Global Firebase Vars ---
         let app, auth, db, userId, isAuthReady = false;
@@ -103,7 +110,10 @@
          * Sets up the real-time listener to Firestore.
          */
         function setupFirestoreListener() {
-            if (!isAuthReady || !userId) return;
+            if (!isAuthReady || !userId || !appId) {
+                console.error("Auth or AppId is not ready. Cannot set up listener.");
+                return;
+            }
 
             const collectionPath = `/artifacts/${appId}/users/${userId}/settlement_batches`;
             settlementCollectionRef = collection(db, collectionPath);
@@ -185,6 +195,7 @@
             });
             
             // --- 2. Trigger Redraw ---
+            if (!container) return; // Guard clause if container isn't ready
             const { width, height } = container.node().getBoundingClientRect();
             if (width > 0 && height > 0) {
                 drawChart(width, height, processedData);
@@ -205,7 +216,10 @@
                 return;
             }
 
-            data.forEach(batch => {
+            // Sort data by effective date, most recent first
+            const sortedData = [...data].sort((a, b) => b["Effective from date"] - a["Effective from date"]);
+
+            sortedData.forEach(batch => {
                 const batchEl = document.createElement('div');
                 batchEl.className = 'bg-slate-50 p-3 rounded-md shadow-sm border border-slate-200 flex justify-between items-center';
                 
@@ -222,13 +236,15 @@
                 deleteBtn.dataset.id = batch.id;
                 
                 deleteBtn.addEventListener('click', async () => {
-                    const id = deleteBtn.dataset.id;
-                    if (id) {
-                        try {
-                            await deleteDoc(doc(db, settlementCollectionRef.path, id));
-                            // UI will update automatically via onSnapshot
-                        } catch (error) {
-                            console.error("Error deleting document: ", error);
+                    if (confirm(`Are you sure you want to delete the batch for ${formatShortDate(batch["Effective from date"])}?`)) {
+                        const id = deleteBtn.dataset.id;
+                        if (id) {
+                            try {
+                                await deleteDoc(doc(db, settlementCollectionRef.path, id));
+                                // UI will update automatically via onSnapshot
+                            } catch (error) {
+                                console.error("Error deleting document: ", error);
+                            }
                         }
                     }
                 });
@@ -248,8 +264,14 @@
             const formData = new FormData(form);
             
             try {
+                const effectiveDate = parseHtmlDate(formData.get("effectiveDate"));
+                if (!effectiveDate) {
+                    alert("Effective from date is required.");
+                    return;
+                }
+
                 const newBatch = {
-                    "Effective from date": Timestamp.fromDate(parseHtmlDate(formData.get("effectiveDate"))),
+                    "Effective from date": Timestamp.fromDate(effectiveDate),
                     "No of supplies": +formData.get("supplies")
                 };
 
@@ -282,6 +304,7 @@
         function drawChart(containerWidth, containerHeight, chartData) {
             // Clear previous chart
             container.selectAll("svg").remove();
+            container.selectAll("p").remove(); // Clear any error messages
 
             if (chartData.length === 0) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("No valid data to display. Add data in the 'Manage Data' tab.");
@@ -301,7 +324,8 @@
             // --- 3. Scales ---
             
             // Define Today's Date
-            const today = new Date("2025-10-23T08:30:00"); // Based on provided current time
+            const today = new Date(); // Use the actual current date
+            // const today = new Date("2025-10-23T08:30:00"); // Hardcoded "Today" for testing
 
             const minDate = d3.min(chartData, d => d["Effective from date"]);
             const maxDate = d3.max(chartData, d => d.maxDate);
@@ -310,13 +334,16 @@
                  container.append("p").attr("class", "text-slate-500 p-4").text("Could not determine date range from data.");
                  return;
             }
+            
+            // Add some padding to the date domain
+            const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)];
 
             const xScale = d3.scaleTime()
-                .domain([d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)])
+                .domain(dateDomain)
                 .range([0, width]);
 
             const yScale = d3.scaleBand()
-                .domain(chartData.map(d => d["Effective from date"]))
+                .domain(chartData.map(d => d["Effective from date"]).sort((a,b) => a - b)) // Sort dates for Y-axis
                 .range([0, height])
                 .padding(0.4);
 
@@ -357,8 +384,8 @@
 
             // --- 5a. Zoom setup ---
             const zoom = d3.zoom()
-                .scaleExtent([0.5, 10])
-                .translateExtent([[0, 0], [width, height]])
+                .scaleExtent([0.5, 10]) // Min/max zoom
+                .translateExtent([[0, 0], [width, height]]) // Panning extent
                 .extent([[0, 0], [width, height]])
                 .on("zoom", (event) => {
                     const newXScale = event.transform.rescaleX(xScale);
@@ -377,6 +404,7 @@
                     updateTodayMarker(newXScale);
                 });
 
+            // This rect captures zoom events
             chartArea.append("rect")
                 .attr("class", "zoom-area")
                 .attr("width", width)
@@ -449,7 +477,7 @@
                 .attr("class", "today-line")
                 .attr("y1", 0)
                 .attr("y2", height)
-                .attr("stroke", "#ef4444")
+                .attr("stroke", "#ef4444") // red-500
                 .attr("stroke-width", 2)
                 .attr("stroke-dasharray", "4 2");
 
@@ -517,7 +545,7 @@
             tabChartBtn.addEventListener('click', () => {
                 tabChartBtn.className = activeTabClasses;
                 tabDataBtn.className = inactiveTabClasses;
-                panelChartEl.className = 'flex h-[75vh]'; // <-- Fix: was 'block'
+                panelChartEl.className = 'flex h-[75vh]';
                 panelDataEl.className = 'hidden h-[75vh] flex flex-col';
                 
                 // Redraw chart in case dimensions changed while hidden
@@ -540,11 +568,15 @@
             
             // --- Firebase Initialization ---
             try {
+                if (!firebaseConfig.appId) {
+                     throw new Error("Firebase 'appId' is missing or empty in your config.");
+                }
+
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
                 // setLogLevel('Debug'); // <-- REMOVED: This was causing the error
-                setFirestoreLogLevel('Debug');
+                setFirestoreLogLevel('debug'); // Use lowercase 'debug'
 
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
@@ -575,7 +607,8 @@
             
             // --- Resize Observer ---
             const resizeObserver = new ResizeObserver(entries => {
-                if (panelChartEl.className.includes('block')) {
+                // Check if the chart panel is visible before redrawing
+                if (!panelChartEl.classList.contains('hidden')) {
                     const entry = entries[0];
                     const { width, height } = entry.contentRect;
                     if (width > 0 && height > 0) {
@@ -654,9 +687,7 @@
             Active periods are highlighted (opacity 100%). The red line indicates "Today". You can zoom and pan.
         </p>
 
-        <!-- New Tab Layout -->
         <div class="mt-4">
-            <!-- Tab Navigation -->
             <div class="border-b border-slate-200">
                 <nav class="flex -mb-px" aria-label="Tabs">
                     <button id="tab-chart" class="border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8">
@@ -668,17 +699,13 @@
                 </nav>
             </div>
 
-            <!-- Tab Panels -->
             <div class="mt-6">
-                <!-- Chart Panel (visible by default) -->
-                <div id="panel-chart" class="flex h-[75vh]"> <!-- <-- Fix: was 'block' -->
+                <div id="panel-chart" class="flex h-[75vh]">
                     <div id="chart-container" class="flex-grow w-full h-full relative border rounded-md border-slate-200"></div>
                 </div>
 
-                <!-- Data Panel (hidden by default) -->
                 <div id="panel-data" class="hidden h-[75vh] flex flex-col">
                     
-                    <!-- Add New Batch Form -->
                     <h2 class="text-lg font-semibold text-slate-700 mb-2">Add New Batch</h2>
                     <form id="add-batch-form" class="mb-6 p-4 border border-slate-200 rounded-lg bg-slate-50">
                         <div class="form-grid">
@@ -716,10 +743,8 @@
                         </button>
                     </form>
 
-                    <!-- Existing Data List -->
                     <h2 class="text-lg font-semibold text-slate-700 mb-2">Existing Batches</h2>
                     <div id="batch-list-container" class="flex-grow space-y-2 overflow-y-auto p-1">
-                        <!-- Batches will be dynamically rendered here -->
                         <p class="text-slate-500 text-sm">Loading data...</p>
                     </div>
                 </div>
@@ -728,12 +753,7 @@
 
     </div>
 
-    <!-- Tooltip -->
     <div id="tooltip" class="fixed hidden bg-slate-900 text-white text-xs rounded-md px-3 py-2 shadow-lg" style="pointer-events: none;"></div>
 
 </body>
 </html>
-
-
-
-
