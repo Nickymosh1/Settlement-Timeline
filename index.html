@@ -7,7 +7,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script type="module">
-        // --- THIS BLOCK IS NOW CORRECTED ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -31,6 +30,7 @@
  
         // --- Global App State ---
         let data = []; 
+        const today = new Date(); // Define today's date globally
         
         // D3 Selections
         let container, tooltip;
@@ -52,7 +52,6 @@
             if (!dateString) return null;
             const parts = dateString.split('-');
             if (parts.length === 3) {
-                // Month is 0-indexed in JS Dates (0 = Jan, 11 = Dec)
                 return new Date(parts[0], parts[1] - 1, parts[2]);
             }
             return null;
@@ -76,6 +75,47 @@
             return result;
         }
 
+        // --- NEW: Function to calculate and display stats ---
+        function updateStats(data) {
+            // 1. Calculate Total Supplies
+            const totalSupplies = data.reduce((acc, d) => acc + (d["No of supplies"] || 0), 0);
+            document.getElementById('stat-total').textContent = totalSupplies.toLocaleString('en-GB');
+
+            // 2. Initialize counts for each period
+            const counts = { "Pre-Effective": 0 };
+            allPeriodTypes.forEach(p => counts[p] = 0); // "Effective", "(II) Run", etc.
+
+            // 3. Categorize each batch based on today's date
+            for (const batch of data) {
+                const supplies = batch["No of supplies"];
+                
+                // Find the latest period this batch is in (checking in reverse)
+                if (today >= batch["(DF) Run"]) counts["(DF) Run"] += supplies;
+                else if (today >= batch["(RF) Run"]) counts["(RF) Run"] += supplies;
+                else if (today >= batch["(R3) Run"]) counts["(R3) Run"] += supplies;
+                else if (today >= batch["(R2) Run"]) counts["(R2) Run"] += supplies;
+                else if (today >= batch["(R1) Run"]) counts["(R1) Run"] += supplies;
+                else if (today >= batch["SSF Run"]) counts["SSF Run"] += supplies;
+                else if (today >= batch["(II) Run"]) counts["(II) Run"] += supplies;
+                else if (today >= batch["Effective from date"]) counts["Effective"] += supplies;
+                else counts["Pre-Effective"] += supplies;
+            }
+
+            // 4. Update HTML for each stat box
+            allPeriodTypes.forEach(period => {
+                const el = document.getElementById(`stat-${period}`);
+                if (el) {
+                    el.textContent = counts[period].toLocaleString('en-GB');
+                }
+            });
+            // Also update Pre-Effective
+            const preEl = document.getElementById('stat-Pre-Effective');
+            if (preEl) {
+                 preEl.textContent = counts['Pre-Effective'].toLocaleString('en-GB');
+            }
+        }
+
+
         /**
          * Sets up the real-time listener to Firestore.
          */
@@ -85,13 +125,11 @@
                 return;
             }
 
-            // This is our new shared path
             const collectionPath = `/artifacts/${appId}/shared_settlement_batches`;
             settlementCollectionRef = collection(db, collectionPath);
 
             onSnapshot(settlementCollectionRef, (snapshot) => {
                 
-                // Process snapshot
                 data = snapshot.docs.map(doc => {
                     const docData = doc.data();
                     const processedData = {
@@ -99,7 +137,6 @@
                         "No of supplies": docData["No of supplies"],
                         "Effective from date": docData["Effective from date"]?.toDate()
                     };
-                    // Dynamically read all run types from the document
                     runTypes.forEach(run => {
                         if (docData[run]) {
                             processedData[run] = docData[run].toDate();
@@ -110,8 +147,8 @@
 
                 data = data.filter(d => d["Effective from date"]);
 
-                // These functions will now correctly render the empty state
-                // if the database has no data.
+                // Run all UI updates
+                updateStats(data); // <-- NEW: Update the stats dashboard
                 processAndDraw();
                 renderManageDataUI();
 
@@ -153,7 +190,19 @@
                     }
                 }
                 
-                parsed.maxDate = dates.length > 0 ? dates[dates.length - 1].date : parsed["Effective from date"];
+                // Add the final segment (e.g., DF Run to infinity)
+                // This is important for the "Today" marker logic
+                if (dates.length > 0) {
+                    const lastDate = dates[dates.length - 1];
+                    parsed.segments.push({
+                        runType: lastDate.type,
+                        startDate: lastDate.date,
+                        endDate: addMonths(lastDate.date, 24), // Show last period as lasting 2 years
+                        parentData: parsed
+                    });
+                }
+                
+                parsed.maxDate = dates.length > 0 ? d3.max(parsed.segments, s => s.endDate) : parsed["Effective from date"];
                 return parsed;
             });
             
@@ -277,8 +326,7 @@
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
             // --- 3. Scales ---
-            const today = new Date(); 
-
+            
             const minDate = d3.min(chartData, d => d["Effective from date"]);
             const maxDate = d3.max(chartData, d => d.maxDate);
             
@@ -287,6 +335,7 @@
                  return;
             }
             
+            // Give 1 month padding on either side
             const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)];
 
             const xScale = d3.scaleTime()
@@ -302,8 +351,12 @@
                 .domain(allPeriodTypes);
 
             // --- 4. Axes ---
-            const xAxis = d3.axisBottom(xScale).ticks(d3.timeMonth.every(1)).tickFormat(d3.timeFormat("%b %Y"));
-            const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate); // Uses new UK format
+            // --- UPDATED X-AXIS: Ticks every week, formatted as dd/mm/yy ---
+            const xAxis = d3.axisBottom(xScale)
+                .ticks(d3.timeWeek.every(1))
+                .tickFormat(d3.timeFormat("%d/%m/%y"));
+            
+            const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate); // Uses UK format
 
             const xAxisGroup = svg.append("g")
                 .attr("class", "x-axis")
@@ -314,7 +367,7 @@
                 .attr("transform", "rotate(-30)")
                 .attr("text-anchor", "end")
                 .attr("dx", "-.5em")
-                .attr("dy", ".5em");
+                .attr("dy", ".8em"); // Added more space for new date format
 
             svg.append("g")
                 .attr("class", "y-axis")
@@ -344,7 +397,7 @@
                         .attr("transform", "rotate(-30)")
                         .attr("text-anchor", "end")
                         .attr("dx", "-.5em")
-                        .attr("dy", ".5em");
+                        .attr("dy", ".8em");
 
                     chartArea.selectAll(".run-bar")
                         .attr("x", d => newXScale(d.startDate))
@@ -461,7 +514,7 @@
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
-                .attr("transform", (d, i) => `translate(${i * 80}, 0)`); // Spaced them a bit closer
+                .attr("transform", (d, i) => `translate(${i * 80}, 0)`); 
 
             legendItems.append("rect")
                 .attr("x", 0)
@@ -526,7 +579,6 @@
                 db = getFirestore(app);
                 setFirestoreLogLevel('debug'); 
 
-                // *** THIS TYPO IS NOW FIXED ***
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
@@ -616,11 +668,51 @@
 <body class="bg-slate-50 h-full p-4 md:p-8">
 
     <div class="bg-white rounded-lg shadow-xl p-4 md:p-6 w-full max-w-7xl mx-auto flex flex-col min-h-[90vh]">
-        <h1 class="text-2xl font-bold text-slate-800 mb-1">Settlement Runs Timeline</h1>
-        <p class="text-sm text-slate-500 mb-4">
-            Each row shows a batch of supplies. Colored bars represent the time period between settlement runs.<br>
-            Active periods are highlighted (opacity 100%). The red line indicates "Today". You can zoom and pan.
-        </g> <div class="mt-4">
+        <h1 class="text-2xl font-bold text-slate-800 mb-4">Settlement Runs Timeline</h1>
+
+        <div id="stats-bar" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3 mb-4">
+            <div class="bg-blue-50 p-3 rounded-lg shadow-md">
+                <h3 class="text-sm font-medium text-blue-600 truncate">Total Supplies</h3>
+                <p id="stat-total" class="text-2xl md:text-3xl font-bold text-blue-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">Pre-Effective</h3>
+                <p id="stat-Pre-Effective" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">Effective</h3>
+                <p id="stat-Effective" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">(II) Run</h3>
+                <p id="stat-(II) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">SSF Run</h3>
+                <p id="stat-SSF Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">(R1) Run</h3>
+                <p id="stat-(R1) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">(R2) Run</h3>
+                <p id="stat-(R2) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">(R3) Run</h3>
+                <p id="stat-(R3) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">(RF) Run</h3>
+                <p id="stat-(RF) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-gray-50 p-3 rounded-lg">
+                <h3 class="text-sm font-medium text-gray-600 truncate">(DF) Run</h3>
+                <p id="stat-(DF) Run" class="text-2xl md:text-3xl font-bold text-gray-900">-</p>
+            </div>
+        </div>
+        <div class="mt-4">
             <div class="border-b border-slate-200">
                 <nav class="flex -mb-px" aria-label="Tabs">
                     <button id="tab-chart" class="border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm mr-8">
