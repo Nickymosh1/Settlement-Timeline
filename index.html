@@ -7,12 +7,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeApp } from "https.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, Timestamp, getDocs, writeBatch, setLogLevel as setFirestoreLogLevel } from "https.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Firebase/App Config ---
-        // This is your project's unique configuration
         const firebaseConfig = {
           apiKey: "AIzaSyBMVUAeKxRu83Pi6eng5my26bgLmVYe09U",
           authDomain: "settlement-timeline.firebaseapp.com",
@@ -22,47 +21,31 @@
           appId: "1:508924605453:web:8c765d749c8e5d4c905144"
         };
         
-        // These lines now read from the config object above
         const appId = firebaseConfig.appId;
-        const initialAuthToken = null; // We are using anonymous auth
+        const initialAuthToken = null; 
 
         // --- Global Firebase Vars ---
         let app, auth, db, userId, isAuthReady = false;
         let settlementCollectionRef;
  
         // --- Global App State ---
-        let data = []; // This will be populated from Firestore
+        let data = []; 
         
-        // D3 Selections - Declare globally, assign when DOM is ready
+        // D3 Selections
         let container, tooltip;
 
-        // --- Initial Data (for seeding only) ---
-        const initialCsvData = `
-,Effective from date,No of supplies,(II) Run,SF run,(R1) Run,(RF) Run,(DF) Run
-,22/10/2025,2,29/11/2025,1/12/2025,2/12/2025,22/02/2026,22/06/2027
-,23/10/2025,26,30/11/2025,3/12/2025,4/12/2025,23/02/2026,23/06/2027
-,24/10/2025,25,1/12/2025,4/12/2025,5/12/2025,24/02/2026,24/06/2027
-,27/10/2025,41,3/12/2025,5/12/2025,6/12/2025,27/02/2026,27/06/2027
-,28/10/2025,30,4/12/2025,6/12/2025,7/12/2025,28/02/2026,28/06/2027
-,29/10/2025,12,5/12/2025,7/12/2025,8/12/2025,1/03/2026,29/06/2027
-,30/10/2025,2,6/12/2025,8/12/2025,10/12/2025,2/03/2026,30/06/2027
-,31/10/2025,1,7/12/2025,9/12/2025,11/12/2025,3/03/2026,1/07/2027
-        `;
-
-        // --- Global Setup ---
-        const runTypes = ["(II) Run", "SF run", "(R1) Run", "(RF) Run", "(DF) Run"];
-        const allPeriodTypes = ["Effective", "(II) Run", "SF run", "(R1) Run", "(RF) Run", "(DF) Run"];
+        // --- Global Setup: Updated Run Types ---
+        const runTypes = ["(II) Run", "SSF Run", "(R1) Run", "(R2) Run", "(R3) Run", "(RF) Run", "(DF) Run"];
+        const allPeriodTypes = ["Effective", "(II) Run", "SSF Run", "(R1) Run", "(R2) Run", "(R3) Run", "(RF) Run", "(DF) Run"];
 
         // D3 Formatters
         const parseDate = d3.timeParse("%d/%m/%Y");
         const formatFullDate = d3.timeFormat("%a, %d %B %Y");
-        const formatShortDate = d3.timeFormat("%d-%b-%y");
+        const formatShortDate = d3.timeFormat("%d/%m/%Y"); // UK Date Format
         const formatHtmlDate = d3.timeFormat("%Y-%m-%d");
 
         /**
          * Helper to parse YYYY-MM-DD string to a JS Date object safely.
-         * @param {string} dateString - Date string in YYYY-MM-DD format.
-         * @returns {Date | null} A JS Date object or null.
          */
         function parseHtmlDate(dateString) {
             if (!dateString) return null;
@@ -75,65 +58,49 @@
         }
 
         /**
-         * One-time function to seed database from initial CSV data.
+         * Adds a number of days to a given date.
          */
-        async function seedInitialData() {
-            console.log("Seeding initial data...");
-            try {
-                const parsedSeedData = d3.csvParse(initialCsvData.trim(), d => {
-                    const batch = {
-                        "Effective from date": Timestamp.fromDate(parseDate(d["Effective from date"])),
-                        "No of supplies": +d["No of supplies"]
-                    };
-                    runTypes.forEach(run => {
-                        const runDate = parseDate(d[run]);
-                        if (runDate) {
-                            batch[run] = Timestamp.fromDate(runDate);
-                        }
-                    });
-                    return batch;
-                });
-
-                const batch = writeBatch(db);
-                parsedSeedData.forEach(item => {
-                    const docRef = doc(settlementCollectionRef); // Create a new doc with auto-ID
-                    batch.set(docRef, item);
-                });
-                await batch.commit();
-                console.log("Initial data seeded successfully.");
-            } catch (error) {
-                console.error("Error seeding data: ", error);
-            }
+        function addDays(date, days) {
+            const result = new Date(date);
+            result.setDate(result.getDate() + days);
+            return result;
+        }
+        
+        /**
+         * Adds a number of months to a given date.
+         */
+        function addMonths(date, months) {
+            const result = new Date(date);
+            result.setMonth(result.getMonth() + months);
+            return result;
         }
 
         /**
          * Sets up the real-time listener to Firestore.
          */
         function setupFirestoreListener() {
-            if (!isAuthReady || !userId || !appId) {
+            if (!isAuthReady || !appId) {
                 console.error("Auth or AppId is not ready. Cannot set up listener.");
                 return;
             }
 
+            // This is our new shared path
             const collectionPath = `/artifacts/${appId}/shared_settlement_batches`;
             settlementCollectionRef = collection(db, collectionPath);
 
             onSnapshot(settlementCollectionRef, (snapshot) => {
-                if (snapshot.empty) {
-                    console.log("No data found. Seeding initial data.");
-                    seedInitialData();
-                    return;
-                }
-
+                // NOTE: The 'if (snapshot.empty)' block that called the
+                // seed function has been removed.
+                
                 // Process snapshot
                 data = snapshot.docs.map(doc => {
                     const docData = doc.data();
                     const processedData = {
                         id: doc.id,
                         "No of supplies": docData["No of supplies"],
-                        // Convert all Firestore Timestamps back to JS Dates
                         "Effective from date": docData["Effective from date"]?.toDate()
                     };
+                    // Dynamically read all run types from the document
                     runTypes.forEach(run => {
                         if (docData[run]) {
                             processedData[run] = docData[run].toDate();
@@ -142,10 +109,10 @@
                     return processedData;
                 });
 
-                // Filter out any potential bad data
                 data = data.filter(d => d["Effective from date"]);
 
-                // Trigger UI updates
+                // These functions will now correctly render the empty state
+                // if the database has no data.
                 processAndDraw();
                 renderManageDataUI();
 
@@ -159,25 +126,22 @@
          * Processes the global 'data' array into segments and redraws the chart.
          */
         function processAndDraw() {
-            // --- 1. Data Processing (into segments) ---
             const processedData = data.map(d => {
-                const parsed = { ...d }; // Clone the data
+                const parsed = { ...d }; 
                 const dates = [];
                 if (parsed["Effective from date"]) {
                     dates.push({ type: "Effective", date: parsed["Effective from date"] });
                 }
                 
                 runTypes.forEach(run => {
-                    const runDate = parsed[run]; // Already a JS Date
+                    const runDate = parsed[run]; 
                     if (runDate) {
                         dates.push({ type: run, date: runDate });
                     }
                 });
 
-                // Sort dates chronologically
                 dates.sort((a, b) => a.date - b.date);
 
-                // Create segments
                 parsed.segments = [];
                 for (let i = 0; i < dates.length - 1; i++) {
                     if (dates[i].date && dates[i+1].date && dates[i].date < dates[i+1].date) {
@@ -185,7 +149,7 @@
                             runType: dates[i].type,
                             startDate: dates[i].date,
                             endDate: dates[i + 1].date,
-                            parentData: parsed // Pass full parent data
+                            parentData: parsed 
                         });
                     }
                 }
@@ -194,8 +158,7 @@
                 return parsed;
             });
             
-            // --- 2. Trigger Redraw ---
-            if (!container) return; // Guard clause if container isn't ready
+            if (!container) return; 
             const { width, height } = container.node().getBoundingClientRect();
             if (width > 0 && height > 0) {
                 drawChart(width, height, processedData);
@@ -209,14 +172,13 @@
             const listContainer = document.getElementById('batch-list-container');
             if (!listContainer) return;
 
-            listContainer.innerHTML = ''; // Clear existing list
+            listContainer.innerHTML = ''; 
             
             if (data.length === 0) {
                 listContainer.innerHTML = `<p class="text-slate-500 text-sm">No settlement batches found. Add one using the form above.</p>`;
                 return;
             }
 
-            // Sort data by effective date, most recent first
             const sortedData = [...data].sort((a, b) => b["Effective from date"] - a["Effective from date"]);
 
             sortedData.forEach(batch => {
@@ -241,7 +203,6 @@
                         if (id) {
                             try {
                                 await deleteDoc(doc(db, settlementCollectionRef.path, id));
-                                // UI will update automatically via onSnapshot
                             } catch (error) {
                                 console.error("Error deleting document: ", error);
                             }
@@ -270,24 +231,23 @@
                     return;
                 }
 
+                // Auto-calculate Settlement Dates based on your rules
                 const newBatch = {
                     "Effective from date": Timestamp.fromDate(effectiveDate),
-                    "No of supplies": +formData.get("supplies")
+                    "No of supplies": +formData.get("supplies"),
+                    "(II) Run": Timestamp.fromDate(addDays(effectiveDate, 7)),     // 1 week
+                    "SSF Run":  Timestamp.fromDate(addMonths(effectiveDate, 1)),  // 1 month
+                    "(R1) Run": Timestamp.fromDate(addMonths(effectiveDate, 2)),  // 2 months
+                    "(R2) Run": Timestamp.fromDate(addMonths(effectiveDate, 5)),  // 5 months
+                    "(R3) Run": Timestamp.fromDate(addMonths(effectiveDate, 7)),  // 7 months
+                    "(RF) Run": Timestamp.fromDate(addMonths(effectiveDate, 14)), // 14 months
+                    "(DF) Run": Timestamp.fromDate(addMonths(effectiveDate, 28))  // 28 months
                 };
-
-                runTypes.forEach(run => {
-                    const dateVal = parseHtmlDate(formData.get(run));
-                    if (dateVal) {
-                        newBatch[run] = Timestamp.fromDate(dateVal);
-                    }
-                });
 
                 // Add to Firestore
                 await addDoc(settlementCollectionRef, newBatch);
                 
-                // Clear form
                 form.reset();
-                // UI will update automatically via onSnapshot
 
             } catch (error) {
                 console.error("Error adding batch: ", error);
@@ -297,14 +257,10 @@
 
         /**
          * The D3 drawing function.
-         * @param {number} containerWidth - The width of the chart container.
-         * @param {number} containerHeight - The height of the chart container.
-         * @param {Array} chartData - The processed data with segments.
          */
         function drawChart(containerWidth, containerHeight, chartData) {
-            // Clear previous chart
             container.selectAll("svg").remove();
-            container.selectAll("p").remove(); // Clear any error messages
+            container.selectAll("p").remove(); 
 
             if (chartData.length === 0) {
                  container.append("p").attr("class", "text-slate-500 p-4").text("No valid data to display. Add data in the 'Manage Data' tab.");
@@ -322,10 +278,7 @@
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
             // --- 3. Scales ---
-            
-            // Define Today's Date
-            const today = new Date(); // Use the actual current date
-            // const today = new Date("2025-10-23T08:30:00"); // Hardcoded "Today" for testing
+            const today = new Date(); 
 
             const minDate = d3.min(chartData, d => d["Effective from date"]);
             const maxDate = d3.max(chartData, d => d.maxDate);
@@ -335,7 +288,6 @@
                  return;
             }
             
-            // Add some padding to the date domain
             const dateDomain = [d3.timeMonth.floor(minDate), d3.timeMonth.ceil(maxDate)];
 
             const xScale = d3.scaleTime()
@@ -343,7 +295,7 @@
                 .range([0, width]);
 
             const yScale = d3.scaleBand()
-                .domain(chartData.map(d => d["Effective from date"]).sort((a,b) => a - b)) // Sort dates for Y-axis
+                .domain(chartData.map(d => d["Effective from date"]).sort((a,b) => a - b)) // Sort dates
                 .range([0, height])
                 .padding(0.4);
 
@@ -352,7 +304,7 @@
 
             // --- 4. Axes ---
             const xAxis = d3.axisBottom(xScale).ticks(d3.timeMonth.every(1)).tickFormat(d3.timeFormat("%b %Y"));
-            const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate);
+            const yAxis = d3.axisLeft(yScale).tickFormat(formatShortDate); // Uses new UK format
 
             const xAxisGroup = svg.append("g")
                 .attr("class", "x-axis")
@@ -372,7 +324,6 @@
                 .attr("font-weight", "600");
 
             // --- 5. Chart Content ---
-            
             svg.append("defs").append("clipPath")
                 .attr("id", "clip")
                 .append("rect")
@@ -382,10 +333,9 @@
             const chartArea = svg.append("g")
                 .attr("clip-path", "url(#clip)");
 
-            // --- 5a. Zoom setup ---
             const zoom = d3.zoom()
-                .scaleExtent([0.5, 10]) // Min/max zoom
-                .translateExtent([[0, 0], [width, height]]) // Panning extent
+                .scaleExtent([0.5, 10]) 
+                .translateExtent([[0, 0], [width, height]]) 
                 .extent([[0, 0], [width, height]])
                 .on("zoom", (event) => {
                     const newXScale = event.transform.rescaleX(xScale);
@@ -404,7 +354,6 @@
                     updateTodayMarker(newXScale);
                 });
 
-            // This rect captures zoom events
             chartArea.append("rect")
                 .attr("class", "zoom-area")
                 .attr("width", width)
@@ -414,7 +363,7 @@
                 .call(zoom);
 
             const batchGroups = chartArea.selectAll(".batch")
-                .data(chartData, d => d.id) // Use Firestore ID as key
+                .data(chartData, d => d.id) 
                 .enter()
                 .append("g")
                 .attr("class", "batch")
@@ -441,10 +390,13 @@
                             <hr>
                             <strong>Batch Info (Effective: ${formatShortDate(d.parentData["Effective from date"])})</strong><br>
                             Total Supplies: ${d.parentData["No of supplies"]}<br>
+                            
                             <span style="opacity: 0.8; font-size: 0.9em;">
                                 (II) Run: ${d.parentData["(II) Run"] ? formatShortDate(d.parentData["(II) Run"]) : 'N/A'}<br>
-                                SF run: ${d.parentData["SF run"] ? formatShortDate(d.parentData["SF run"]) : 'N/A'}<br>
+                                SSF Run: ${d.parentData["SSF Run"] ? formatShortDate(d.parentData["SSF Run"]) : 'N/A'}<br>
                                 (R1) Run: ${d.parentData["(R1) Run"] ? formatShortDate(d.parentData["(R1) Run"]) : 'N/A'}<br>
+                                (R2) Run: ${d.parentData["(R2) Run"] ? formatShortDate(d.parentData["(R2) Run"]) : 'N/A'}<br>
+                                (R3) Run: ${d.parentData["(R3) Run"] ? formatShortDate(d.parentData["(R3) Run"]) : 'N/A'}<br>
                                 (RF) Run: ${d.parentData["(RF) Run"] ? formatShortDate(d.parentData["(RF) Run"]) : 'N/A'}<br>
                                 (DF) Run: ${d.parentData["(DF) Run"] ? formatShortDate(d.parentData["(DF) Run"]) : 'N/A'}
                             </span>
@@ -510,7 +462,7 @@
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
-                .attr("transform", (d, i) => `translate(${i * 90}, 0)`);
+                .attr("transform", (d, i) => `translate(${i * 80}, 0)`); // Spaced them a bit closer
 
             legendItems.append("rect")
                 .attr("x", 0)
@@ -529,7 +481,6 @@
 
         // --- Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
-            // --- Assign D3 Selections ---
             container = d3.select("#chart-container");
             tooltip = d3.select("#tooltip");
 
@@ -548,7 +499,6 @@
                 panelChartEl.className = 'flex h-[75vh]';
                 panelDataEl.className = 'hidden h-[75vh] flex flex-col';
                 
-                // Redraw chart in case dimensions changed while hidden
                 const { width, height } = container.node().getBoundingClientRect();
                 if (width > 0 && height > 0 && data.length > 0) {
                     processAndDraw();
@@ -575,15 +525,14 @@
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
-                // setLogLevel('Debug'); // <-- REMOVED: This was causing the error
-                setFirestoreLogLevel('debug'); // Use lowercase 'debug'
+                setFirestoreLogLevel('debug'); 
 
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
                         console.log("Auth state ready, user ID:", userId);
-                        setupFirestoreListener(); // Setup listener *after* user is confirmed
+                        setupFirestoreListener(); 
                     } else {
                         isAuthReady = false;
                         userId = null;
@@ -591,14 +540,8 @@
                     }
                 });
 
-                // Sign in
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                    console.log("Signed in with custom token.");
-                } else {
-                    await signInAnonymously(auth);
-                    console.log("Signed in anonymously.");
-                }
+                await signInAnonymously(auth);
+                console.log("Signed in anonymously.");
 
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
@@ -607,7 +550,6 @@
             
             // --- Resize Observer ---
             const resizeObserver = new ResizeObserver(entries => {
-                // Check if the chart panel is visible before redrawing
                 if (!panelChartEl.classList.contains('hidden')) {
                     const entry = entries[0];
                     const { width, height } = entry.contentRect;
@@ -639,28 +581,21 @@
             opacity: 0.8;
             cursor: pointer;
         }
-        /* Style for the tooltip horizontal rule */
         #tooltip hr {
-            border-top: 1px solid #475569; /* slate-600 */
+            border-top: 1px solid #475569; 
             margin-top: 4px;
             margin-bottom: 4px;
         }
-        /* Ensure chart container has a height */
         #chart-container {
             min-height: 400px;
         }
         
-        /* Form grid layout */
         #add-batch-form .form-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 1rem;
         }
-        @media (min-width: 768px) {
-            #add-batch-form .form-grid {
-                grid-template-columns: repeat(4, 1fr);
-            }
-        }
+
         #add-batch-form label {
             display: block;
             font-size: 0.75rem;
@@ -685,7 +620,7 @@
         <p class="text-sm text-slate-500 mb-4">
             Each row shows a batch of supplies. Colored bars represent the time period between settlement runs.<br>
             Active periods are highlighted (opacity 100%). The red line indicates "Today". You can zoom and pan.
-        </p>
+        </t>
 
         <div class="mt-4">
             <div class="border-b border-slate-200">
@@ -716,26 +651,6 @@
                             <div>
                                 <label for="supplies">No of supplies</label>
                                 <input type="number" id="supplies" name="supplies" required min="0">
-                            </div>
-                            <div>
-                                <label for="ii-run">(II) Run</label>
-                                <input type="date" id="ii-run" name="(II) Run">
-                            </div>
-                            <div>
-                                <label for="sf-run">SF run</label>
-                                <input type="date" id="sf-run" name="SF run">
-                            </div>
-                            <div>
-                                <label for="r1-run">(R1) Run</label>
-                                <input type="date" id="r1-run" name="(R1) Run">
-                            </div>
-                            <div>
-                                <label for="rf-run">(RF) Run</label>
-                                <input type="date" id="rf-run" name="(RF) Run">
-                            </div>
-                            <div>
-                                <label for="df-run">(DF) Run</label>
-                                <input type="date" id="df-run" name="(DF) Run">
                             </div>
                         </div>
                         <button type="submit" class="mt-4 w-full md:w-auto bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
