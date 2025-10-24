@@ -72,7 +72,7 @@
                 colors.gasOff, // (R2) Run
                 colors.eonRed, // (R3) Run - Using eonRed
                 colors.flash,  // (RF) Run - Reusing flash
-                colors.darkPurple // (DF) Run - Used for marker
+                colors.darkPurple // (DF) Run - Now Dark Purple (used for marker)
              ]);
 
 
@@ -141,8 +141,8 @@
             });
         }
 
-        // --- NEW: Function to show feedback messages ---
-        let feedbackTimeout; // Store timeout ID globally
+        // --- Feedback Message Function ---
+        let feedbackTimeout;
         function showFeedbackMessage(message, type = "success") {
             const feedbackEl = document.getElementById('feedback-message');
             if (!feedbackEl) return;
@@ -151,15 +151,13 @@
             feedbackEl.className = `p-2 rounded text-sm mb-4 ${type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
             feedbackEl.style.display = 'block';
 
-            // Clear previous timeout if it exists
             if (feedbackTimeout) {
                 clearTimeout(feedbackTimeout);
             }
 
-            // Set a new timeout to hide the message
             feedbackTimeout = setTimeout(() => {
                 feedbackEl.style.display = 'none';
-            }, 3000); // Hide after 3 seconds
+            }, 3000);
         }
 
 
@@ -200,7 +198,7 @@
 
             }, (error) => {
                 console.error("Error with Firestore snapshot: ", error);
-                showFeedbackMessage("Error loading data from database.", "error"); // Feedback on error
+                showFeedbackMessage("Error loading data from database.", "error");
             });
         }
 
@@ -326,7 +324,6 @@
                     return;
                 }
 
-                // --- NEW: Input Validation for supplies ---
                 const supplies = +formData.get("supplies");
                 if (supplies <= 0) {
                      alert("Number of supplies must be greater than zero.");
@@ -351,7 +348,6 @@
                 showFeedbackMessage("Batch added successfully!", "success"); // Feedback on add
 
                 form.reset();
-                 // --- NEW: Reset date input to today after adding ---
                 document.getElementById('effectiveDate').value = formatHtmlDate(new Date());
 
 
@@ -366,10 +362,9 @@
          * The D3 drawing function.
          */
         function drawChart(containerWidth, containerHeight, chartData) {
-            // --- NEW: Remove loading indicator ---
             container.select("#chart-loading").remove();
             container.selectAll("svg").remove();
-            container.selectAll("p").remove(); // Clear previous error/empty messages
+            container.selectAll("p").remove();
 
             if (chartData.length === 0) {
                  container.append("p")
@@ -491,8 +486,9 @@
                         .attr("x", d => newXScale(d.startDate))
                         .attr("width", d => Math.max(0, newXScale(d.endDate) - newXScale(d.startDate)));
 
-                    chartArea.selectAll(".end-marker")
-                         .attr("x", d => newXScale(d["(DF) Run"]) - 3); // Recalculate x based on new scale, keep centered
+                    // --- Update DF marker position on zoom ---
+                    chartArea.selectAll(".df-marker")
+                         .attr("x", d => newXScale(d["(DF) Run"]) - 1); // Recalculate x based on new scale, keep centered
 
                     updateTodayMarker(newXScale);
                 });
@@ -512,7 +508,7 @@
                 .attr("class", "batch")
                 .attr("transform", d => `translate(0, ${yScale(d["Effective from date"])})`);
 
-            // Draw the bars for all segments EXCEPT the last one (DF Run)
+            // Draw the bars for all segments
             batchGroups.selectAll(".run-bar")
                 .data(d => d.segments) // Segments array now excludes DF run start
                 .enter()
@@ -564,15 +560,15 @@
                     tooltip.style("display", "none");
                 });
 
-             // Add the End Marker (DF Run date)
+             // --- NEW: Add the Vertical Bar Marker for DF Run date ---
              batchGroups.append("rect")
-                .attr("class", "end-marker")
-                .attr("x", d => xScale(d["(DF) Run"]) - 3) // Center the 6px square on the date
-                .attr("y", (yScale.bandwidth() - 6) / 2) // Center vertically
-                .attr("width", 6)
-                .attr("height", 6)
+                .attr("class", "df-marker") // Changed class name
+                .attr("x", d => xScale(d["(DF) Run"]) - 1) // Center the 2px bar
+                .attr("y", 0)
+                .attr("width", 2) // Make it 2px wide
+                .attr("height", yScale.bandwidth()) // Full height of the band
                 .attr("fill", colors.darkPurple) // Use Dark Purple
-                .style("pointer-events", "all") // Ensure it can receive hover events
+                .style("pointer-events", "all")
                  .on("mouseover", (event, d) => {
                     tooltip.style("display", "block")
                         .html(`
@@ -624,7 +620,6 @@
 
             function updateTodayMarker(currentXScale) {
                 const todayX = currentXScale(today);
-                // Only display if within the visible chart area width
                 const inRange = todayX >= 0 && todayX <= width;
                 todayMarker.style("display", inRange ? "block" : "none");
                 if (inRange) {
@@ -634,18 +629,19 @@
             updateTodayMarker(xScale);
 
             // --- 6. Legend ---
-            // Filter out DF Run from legend as it's now just a marker
-            const legendData = allPeriodTypes.filter(p => p !== "(DF) Run");
+            // --- Restored DF Run to legend ---
+            const legendData = allPeriodTypes;
             const legend = svg.append("g")
                 .attr("class", "legend")
                 .attr("transform", `translate(0, -${margin.top / 2})`);
 
             const legendItems = legend.selectAll(".legend-item")
-                .data(legendData) // Use filtered data
+                .data(legendData) // Use full data
                 .enter()
                 .append("g")
                 .attr("class", "legend-item")
-                .attr("transform", (d, i) => `translate(${i * 80}, 0)`);
+                // Adjust spacing for potentially more items
+                .attr("transform", (d, i) => `translate(${i * 75}, 0)`);
 
             legendItems.append("rect")
                 .attr("x", 0)
@@ -712,7 +708,7 @@
             const addBatchForm = document.getElementById('add-batch-form');
             addBatchForm.addEventListener('submit', handleAddBatch);
 
-            // --- NEW: Set default date for input ---
+            // --- Set default date for input ---
             document.getElementById('effectiveDate').value = formatHtmlDate(new Date());
 
             // --- Firebase Initialization ---
@@ -787,7 +783,7 @@
             fill: #64748b; /* slate-500 for axis text */
             font-size: 0.75rem;
         }
-        .run-bar:hover, .end-marker:hover { /* Apply hover to end marker too */
+        .run-bar:hover, .df-marker:hover { /* Apply hover to DF marker */
             opacity: 0.8;
             cursor: pointer;
         }
