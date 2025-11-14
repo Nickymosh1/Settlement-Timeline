@@ -107,6 +107,29 @@
         }
 
         /**
+         * Adds a number of working days (Mon-Fri) to a given date.
+         */
+        function addWorkingDays(startDate, workingDays) {
+            const date = new Date(startDate);
+            let daysAdded = 0;
+
+            if (workingDays <= 0) {
+                return date; // Return original date if no days to add
+            }
+
+            while (daysAdded < workingDays) {
+                date.setDate(date.getDate() + 1); // Move to the next day
+                const dayOfWeek = date.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+
+                // Check if it's a weekday (not Saturday (6) and not Sunday (0))
+                if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                    daysAdded++;
+                }
+            }
+            return date;
+        }
+
+        /**
          * Calculates and displays stats based on current data.
          */
         function updateStats(data) {
@@ -334,13 +357,14 @@
                 const newBatch = {
                     "Effective from date": Timestamp.fromDate(effectiveDate),
                     "No of supplies": supplies, // Use validated number
-                    "(II) Run": Timestamp.fromDate(addDays(effectiveDate, 7)),     // 1 week
-                    "SSF Run":  Timestamp.fromDate(addMonths(effectiveDate, 1)),  // 1 month
-                    "(R1) Run": Timestamp.fromDate(addMonths(effectiveDate, 2)),  // 2 months
-                    "(R2) Run": Timestamp.fromDate(addMonths(effectiveDate, 5)),  // 5 months
-                    "(R3) Run": Timestamp.fromDate(addMonths(effectiveDate, 7)),  // 7 months
-                    "(RF) Run": Timestamp.fromDate(addMonths(effectiveDate, 14)), // 14 months
-                    "(DF) Run": Timestamp.fromDate(addMonths(effectiveDate, 28))  // 28 months
+                    // New rules based on Working Days (WD) from Effective Date
+                    "(II) Run": Timestamp.fromDate(addWorkingDays(effectiveDate, 5)),    // 5 WD
+                    "SSF Run":  Timestamp.fromDate(addWorkingDays(effectiveDate, 16)),   // 16 WD
+                    "(R1) Run": Timestamp.fromDate(addWorkingDays(effectiveDate, 39)),   // 39 WD
+                    "(R2) Run": Timestamp.fromDate(addWorkingDays(effectiveDate, 84)),   // 84 WD
+                    "(R3) Run": Timestamp.fromDate(addWorkingDays(effectiveDate, 154)),  // 154 WD
+                    "(RF) Run": Timestamp.fromDate(addWorkingDays(effectiveDate, 292)),  // 292 WD
+                    "(DF) Run": Timestamp.fromDate(addMonths(effectiveDate, 30))         // 30 Months
                 };
 
                 // Add to Firestore
@@ -531,7 +555,7 @@
                             <strong>Batch Info (Effective: ${formatShortDate(d.parentData["Effective from date"])})</strong><br>
                             Total Supplies: ${d.parentData["No of supplies"]}<br>
 
-                            <span style="opacity: 0.8; font-size: 0.9em;">
+                            <span style="opacity: 0.8; font-size: 0.9em;"><br>
                                 (II) Run: ${d.parentData["(II) Run"] ? formatShortDate(d.parentData["(II) Run"]) : 'N/A'}<br>
                                 SSF Run: ${d.parentData["SSF Run"] ? formatShortDate(d.parentData["SSF Run"]) : 'N/A'}<br>
                                 (R1) Run: ${d.parentData["(R1) Run"] ? formatShortDate(d.parentData["(R1) Run"]) : 'N/A'}<br>
@@ -928,7 +952,7 @@
                                 <label for="supplies">No of supplies</label>
                                 <input type="number" id="supplies" name="supplies" required min="1"> </div>
                         </div>
-                        <button type="submit" class="mt-4 w-full md:w-auto text-white font-bold py-2 px-4 rounded-md transition-colors" style="background-color: #5E0D98;" onmouseover="this.style.backgroundColor='#36164A'" onmouseout="this.style.backgroundColor='#5E0D98'">
+                        <button type="submit" class="mt-4 w-full md:w-auto text-white font-bold py-2 px-4 rounded-md transition-colors" style="background-color: #5E0D98;" onmouseover="this.style.backgroundColor='#36164A'" onmouseout="this.style.backgroundColor='#5E0D9C'
                             Add New Batch
                         </button>
                     </form>
